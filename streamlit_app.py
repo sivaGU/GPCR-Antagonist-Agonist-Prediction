@@ -597,7 +597,10 @@ def _load_demo_data():
         receptors = [line.strip() for line in RECEPTORS_FILE.read_text(encoding="utf-8").splitlines() if line.strip()]
     ligands_df = pd.DataFrame()
     if LIGANDS_FILE.exists():
-        ligands_df = pd.read_csv(LIGANDS_FILE)
+        try:
+            ligands_df = pd.read_csv(LIGANDS_FILE, encoding="utf-8")
+        except pd.errors.ParserError:
+            ligands_df = pd.read_csv(LIGANDS_FILE, encoding="utf-8", engine="python", on_bad_lines="skip")
     return receptors, ligands_df
 
 
