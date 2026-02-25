@@ -2,7 +2,7 @@
 
 A production-ready Streamlit GUI for predicting GPCR Class A receptor-ligand functional activity (Agonist/Antagonist/Inactive) using machine learning models.
 
-Link: https://gpcr-gui-gzivpn3v5yg7fro3wmccqk.streamlit.app/
+Link: https://gpcr-antagonist-agonist-prediction-8z7elmu8bdoa6cgrzoreyy.streamlit.app/
 
 ## Features
 
@@ -105,5 +105,6 @@ Based on the ML GPCR Class A Functional Activity Manuscript:
 ## Notes
 
 This GUI is designed to work with your trained ML models. Once you add your model artifacts to the `artifacts/` folder and update the `predict.py` module to match your feature extraction pipeline, the GUI will be ready to use.
+
 
 
