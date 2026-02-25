@@ -26,6 +26,11 @@ from rdkit.Chem import AllChem
 
 from src.gpcr.predict import predict_single, predict_batch, load_predictor
 
+# Data paths for demo tool
+DATA_DIR = PROJECT_ROOT / "data"
+RECEPTORS_FILE = DATA_DIR / "gpcr_class_a_receptors.txt"
+LIGANDS_FILE = DATA_DIR / "study_ligands.csv"
+
 
 def extract_smiles_from_file(file_content: bytes, file_extension: str) -> Optional[str]:
     """
@@ -185,18 +190,19 @@ st.set_page_config(
     },
 )
 
-# Inject custom CSS - purple/violet palette for GPCR theme
+# Inject custom CSS - darker purple/violet palette for GPCR theme
 st.markdown("""
 <style>
-    /* Purple-violet palette for GPCR theme */
+    /* Darker purple-violet palette for GPCR theme */
     :root {
-        --light-lavender: #F3E5F5;
-        --soft-purple: #E1BEE7;
-        --medium-purple: #CE93D8;
-        --deep-purple: #BA68C8;
-        --rich-purple: #AB47BC;
-        --dark-purple: #9C27B0;
-        --deep-violet: #7B1FA2;
+        --light-lavender: #E8E0F0;
+        --soft-purple: #D1C4E9;
+        --medium-purple: #B39DDB;
+        --deep-purple: #9575CD;
+        --rich-purple: #7E57C2;
+        --dark-purple: #673AB7;
+        --deep-violet: #512DA8;
+        --darker-violet: #4527A0;
     }
     
     .stApp {
@@ -220,11 +226,11 @@ st.markdown("""
         margin: 2rem auto;
         max-width: 1400px;
         border-radius: 8px;
-        box-shadow: 0 2px 12px rgba(156, 39, 176, 0.08);
+        box-shadow: 0 2px 12px rgba(69, 39, 160, 0.12);
     }
     
     [data-testid="stSidebar"] {
-        background: linear-gradient(180deg, #7B1FA2 0%, #6A1B9A 100%);
+        background: linear-gradient(180deg, #4527A0 0%, #311B92 100%);
         color: #ffffff;
         min-width: 200px !important;
         max-width: 280px !important;
@@ -238,85 +244,85 @@ st.markdown("""
     }
     
     [data-testid="stSidebar"] .css-1d391kg {
-        background-color: #6A1B9A;
+        background-color: #311B92;
     }
     
     .stButton > button {
-        background: linear-gradient(135deg, #BA68C8 0%, #AB47BC 100%);
+        background: linear-gradient(135deg, #7E57C2 0%, #673AB7 100%);
         color: white;
         border: none;
         border-radius: 6px;
         font-weight: 600;
-        box-shadow: 0 2px 4px rgba(186, 104, 200, 0.35);
+        box-shadow: 0 2px 4px rgba(103, 58, 183, 0.4);
         transition: all 0.3s ease;
     }
     
     .stButton > button:hover {
-        background: linear-gradient(135deg, #AB47BC 0%, #9C27B0 100%);
-        box-shadow: 0 4px 8px rgba(171, 71, 188, 0.4);
+        background: linear-gradient(135deg, #673AB7 0%, #512DA8 100%);
+        box-shadow: 0 4px 8px rgba(103, 58, 183, 0.5);
         transform: translateY(-1px);
     }
     
     .stButton > button:focus {
-        background: linear-gradient(135deg, #9C27B0 0%, #7B1FA2 100%);
-        box-shadow: 0 0 0 0.3rem rgba(186, 104, 200, 0.35);
+        background: linear-gradient(135deg, #512DA8 0%, #4527A0 100%);
+        box-shadow: 0 0 0 0.3rem rgba(103, 58, 183, 0.4);
     }
     
     .stDownloadButton > button {
-        background: linear-gradient(135deg, #AB47BC 0%, #9C27B0 100%);
+        background: linear-gradient(135deg, #673AB7 0%, #512DA8 100%);
         color: white;
         border-radius: 6px;
         font-weight: 500;
     }
     
     .stDownloadButton > button:hover {
-        background: linear-gradient(135deg, #9C27B0 0%, #7B1FA2 100%);
+        background: linear-gradient(135deg, #512DA8 0%, #4527A0 100%);
     }
     
     h1, h2, h3 {
-        color: #7B1FA2;
+        color: #4527A0;
         font-weight: 700;
     }
     
     a {
-        color: #7B1FA2;
+        color: #4527A0;
         text-decoration: none;
     }
     
     a:hover {
-        color: #AB47BC;
+        color: #673AB7;
         text-decoration: underline;
     }
     
     [data-testid="stMetricValue"] {
-        color: #7B1FA2;
+        color: #4527A0;
         font-weight: 600;
     }
     
     .stSuccess {
-        background: linear-gradient(90deg, #F3E5F5 0%, #E1BEE7 100%);
-        border-left: 4px solid #BA68C8;
+        background: linear-gradient(90deg, #EDE7F6 0%, #D1C4E9 100%);
+        border-left: 4px solid #7E57C2;
         color: #1a1a1a;
         border-radius: 4px;
     }
     
     .stInfo {
-        background: linear-gradient(90deg, #F3E5F5 0%, #E1BEE7 100%);
-        border-left: 4px solid #BA68C8;
+        background: linear-gradient(90deg, #EDE7F6 0%, #D1C4E9 100%);
+        border-left: 4px solid #7E57C2;
         color: #1a1a1a;
         border-radius: 4px;
     }
     
     .stWarning {
-        background: linear-gradient(90deg, #E1BEE7 0%, #CE93D8 100%);
-        border-left: 4px solid #AB47BC;
+        background: linear-gradient(90deg, #D1C4E9 0%, #B39DDB 100%);
+        border-left: 4px solid #673AB7;
         color: #1a1a1a;
         border-radius: 4px;
     }
     
     .stError {
-        background: linear-gradient(90deg, #E1BEE7 0%, #CE93D8 100%);
-        border-left: 4px solid #9C27B0;
+        background: linear-gradient(90deg, #D1C4E9 0%, #B39DDB 100%);
+        border-left: 4px solid #512DA8;
         color: #1a1a1a;
         border-radius: 4px;
     }
@@ -326,33 +332,33 @@ st.markdown("""
     .stTextInput > label,
     .stSlider > label,
     .stFileUploader > label {
-        color: #7B1FA2;
+        color: #4527A0;
         font-weight: 500;
     }
     
     .streamlit-expanderHeader {
-        background: linear-gradient(90deg, #F3E5F5 0%, #E1BEE7 100%);
-        color: #7B1FA2;
+        background: linear-gradient(90deg, #EDE7F6 0%, #D1C4E9 100%);
+        color: #4527A0;
         border-radius: 4px;
         font-weight: 500;
     }
     
     .streamlit-expanderHeader:hover {
-        background: linear-gradient(90deg, #E1BEE7 0%, #CE93D8 100%);
+        background: linear-gradient(90deg, #D1C4E9 0%, #B39DDB 100%);
     }
     
     .stDataFrame {
-        border: 2px solid #BA68C8;
+        border: 2px solid #7E57C2;
         border-radius: 4px;
     }
     
     hr {
-        border-color: #BA68C8;
+        border-color: #7E57C2;
         border-width: 2px;
     }
     
     .stSlider .stSlider > div > div {
-        background-color: #BA68C8;
+        background-color: #7E57C2;
     }
     
     [data-testid="stSidebar"] .stButton {
@@ -365,13 +371,13 @@ st.markdown("""
         font-size: 1rem;
         text-align: center;
         margin-bottom: 0.5rem;
-        background: linear-gradient(135deg, #AB47BC 0%, #9C27B0 100%) !important;
+        background: linear-gradient(135deg, #673AB7 0%, #512DA8 100%) !important;
         color: white !important;
         box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
     }
     
     [data-testid="stSidebar"] .stButton > button:hover {
-        background: linear-gradient(135deg, #9C27B0 0%, #7B1FA2 100%) !important;
+        background: linear-gradient(135deg, #512DA8 0%, #4527A0 100%) !important;
     }
     
     [data-testid="stSidebar"] h3 {
@@ -386,14 +392,14 @@ st.markdown("""
     }
     
     [data-testid="stSidebar"] .stSuccess {
-        background: linear-gradient(90deg, rgba(186, 104, 200, 0.3) 0%, rgba(171, 71, 188, 0.25) 100%);
-        border-left: 4px solid #BA68C8;
+        background: linear-gradient(90deg, rgba(126, 87, 194, 0.3) 0%, rgba(103, 58, 183, 0.25) 100%);
+        border-left: 4px solid #7E57C2;
         color: #ffffff;
     }
     
     [data-testid="stSidebar"] .stInfo {
-        background: linear-gradient(90deg, rgba(186, 104, 200, 0.25) 0%, rgba(171, 71, 188, 0.2) 100%);
-        border-left: 4px solid #BA68C8;
+        background: linear-gradient(90deg, rgba(126, 87, 194, 0.25) 0%, rgba(103, 58, 183, 0.2) 100%);
+        border-left: 4px solid #7E57C2;
         color: #ffffff;
     }
     
@@ -413,8 +419,9 @@ st.markdown("""
 # ============================================================================
 
 @st.cache_resource
-def get_predictor():
-    return load_predictor(HANDOFF_DIR)
+def get_predictor(model_type: Optional[str] = None):
+    """Load predictor; for demo tool pass model_type in ('rf', 'lightgbm', 'xgboost')."""
+    return load_predictor(HANDOFF_DIR, model_type=model_type)
 
 # ============================================================================
 # PAGES
@@ -465,8 +472,8 @@ def render_home_page():
     st.markdown("## Quick start")
 
     st.info(
-        "**Ready to predict!** Use the **GPCR Prediction** page in the sidebar to enter a GPCR Class A receptor name "
-        "and ligand (SMILES or structure file) to get functional activity predictions with probability distributions."
+        "**Ready to predict!** Use **Demo Prediction Tool** to run study ligands against Class A receptors, "
+        "or **GPCR Ligand Functional Activity Prediction** for single/batch predictions."
     )
 
     st.markdown(
@@ -475,7 +482,8 @@ def render_home_page():
         ### Navigation
         - **Home:** This overview
         - **Documentation:** Setup, model details, and usage
-        - **GPCR Prediction:** Run predictions (receptor + ligand)
+        - **Demo Prediction Tool:** Study ligands × receptors with RF/LightGBM/XGBoost
+        - **GPCR Ligand Functional Activity Prediction:** Run predictions (receptor + ligand)
         """
     )
 
@@ -582,9 +590,97 @@ def render_documentation_page():
     st.success("Questions? Refer to the ML GPCR Class A Functional Activity Manuscript for model details.")
 
 
+def _load_demo_data():
+    """Load receptor list and study ligands for demo tool. Cached per session."""
+    receptors = []
+    if RECEPTORS_FILE.exists():
+        receptors = [line.strip() for line in RECEPTORS_FILE.read_text(encoding="utf-8").splitlines() if line.strip()]
+    ligands_df = pd.DataFrame()
+    if LIGANDS_FILE.exists():
+        ligands_df = pd.read_csv(LIGANDS_FILE)
+    return receptors, ligands_df
+
+
+def render_demo_prediction_page():
+    """Render the Demo Prediction Tool page."""
+    st.title("Demo Prediction Tool")
+    st.caption(
+        "Run predicted functional activity for study ligands against a selected GPCR Class A receptor "
+        "using Random Forest, LightGBM, or XGBoost."
+    )
+
+    receptors, ligands_df = _load_demo_data()
+    if not receptors:
+        st.warning("Receptor list not found. Add data/gpcr_class_a_receptors.txt")
+        return
+    if ligands_df.empty or "smiles" not in ligands_df.columns:
+        st.warning("Study ligands not found or missing 'smiles' column. Add data/study_ligands.csv")
+        return
+
+    n_ligands = len(ligands_df)
+    st.sidebar.markdown("### Demo settings")
+    selected_receptor = st.sidebar.selectbox(
+        "GPCR Class A Receptor",
+        options=receptors,
+        index=min(5, len(receptors) - 1) if receptors else 0,
+        key="demo_receptor",
+    )
+    model_type_label = st.sidebar.selectbox(
+        "Model",
+        options=["Random Forest", "LightGBM", "XGBoost"],
+        index=0,
+        key="demo_model",
+    )
+    model_type_map = {"Random Forest": "rf", "LightGBM": "lightgbm", "XGBoost": "xgboost"}
+    model_type = model_type_map[model_type_label]
+
+    st.markdown(f"**Receptor:** {selected_receptor} · **Model:** {model_type_label} · **Ligands:** {n_ligands}")
+
+    try:
+        predictor = get_predictor(model_type)
+    except Exception as e:
+        st.error(f"Could not load {model_type_label} model: {e}")
+        st.info(
+            "Ensure artifacts/demo_rf, artifacts/demo_lightgbm, and/or artifacts/demo_xgboost exist with model_seed*.pkl. "
+            "Run: python create_dummy_artifacts.py"
+        )
+        return
+
+    if st.button("Run predictions", type="primary", key="demo_run"):
+        pairs = [(selected_receptor, str(row["smiles"])) for _, row in ligands_df.iterrows()]
+        with st.spinner(f"Predicting {n_ligands} ligands for {selected_receptor}..."):
+            results = predict_batch(pairs, predictor=predictor)
+
+        out = ligands_df.copy()
+        out["receptor"] = selected_receptor
+        out["predicted_class"] = [r.predicted_class for r in results]
+        out["class_id"] = [r.class_id for r in results]
+        out["prob_agonist"] = [r.prob_agonist for r in results]
+        out["prob_antagonist"] = [r.prob_antagonist for r in results]
+        out["prob_inactive"] = [r.prob_inactive for r in results]
+        out["prob_std_error"] = [r.prob_std_error if r.prob_std_error is not None else "" for r in results]
+        out["canonical_smiles"] = [r.canonical_smiles for r in results]
+        out["error"] = [r.error for r in results]
+
+        st.subheader("Results")
+        st.dataframe(out, use_container_width=True, height=400)
+        st.download_button(
+            "Download results (CSV)",
+            out.to_csv(index=False),
+            f"demo_{selected_receptor}_{model_type}_{n_ligands}ligands.csv",
+            "text/csv",
+            key="demo_download",
+        )
+
+    st.divider()
+    st.markdown("#### Study ligands (preview)")
+    st.dataframe(ligands_df.head(20), use_container_width=True)
+    st.caption(f"Showing 20 of {n_ligands} ligands. Full set used when you click **Run predictions**.")
+
+
 def render_gpcr_prediction_page():
-    """Render the GPCR prediction page."""
-    st.title("GPCR Functional Activity Prediction")
+    """Render the GPCR Ligand Functional Activity Prediction page."""
+    st.title("GPCR Ligand Functional Activity Prediction")
     st.markdown(
         """
         Predict GPCR Class A receptor-ligand functional activity. Enter a receptor name and ligand (SMILES or structure file),
@@ -595,7 +691,7 @@ def render_gpcr_prediction_page():
     )
 
     try:
-        predictor = get_predictor()
+        predictor = get_predictor(None)
     except Exception as e:
         st.error(f"Could not load model: {e}")
         st.info(
@@ -697,7 +793,7 @@ def render_gpcr_prediction_page():
                         go.Bar(
                             x=['Agonist', 'Antagonist', 'Inactive'],
                             y=[result.prob_agonist, result.prob_antagonist, result.prob_inactive],
-                            marker_color=['#BA68C8', '#AB47BC', '#9C27B0'],
+                            marker_color=['#7E57C2', '#673AB7', '#512DA8'],
                             text=[f'{result.prob_agonist:.3f}', f'{result.prob_antagonist:.3f}', f'{result.prob_inactive:.3f}'],
                             textposition='auto',
                         )
@@ -839,8 +935,11 @@ def main():
     if st.sidebar.button("Documentation", use_container_width=True, key="nav_docs"):
         st.session_state.current_page = "Documentation"
 
-    if st.sidebar.button("GPCR Prediction", use_container_width=True, key="nav_prediction"):
-        st.session_state.current_page = "GPCR Prediction"
+    if st.sidebar.button("Demo Prediction Tool", use_container_width=True, key="nav_demo"):
+        st.session_state.current_page = "Demo Prediction Tool"
+
+    if st.sidebar.button("GPCR Ligand Functional Activity Prediction", use_container_width=True, key="nav_prediction"):
+        st.session_state.current_page = "GPCR Ligand Functional Activity Prediction"
 
     st.sidebar.markdown("---")
 
@@ -848,7 +947,9 @@ def main():
         render_home_page()
     elif st.session_state.current_page == "Documentation":
         render_documentation_page()
-    elif st.session_state.current_page == "GPCR Prediction":
+    elif st.session_state.current_page == "Demo Prediction Tool":
+        render_demo_prediction_page()
+    elif st.session_state.current_page == "GPCR Ligand Functional Activity Prediction":
         render_gpcr_prediction_page()
 
 
