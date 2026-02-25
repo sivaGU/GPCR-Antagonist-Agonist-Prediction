@@ -421,7 +421,11 @@ st.markdown("""
 @st.cache_resource
 def get_predictor(model_type: Optional[str] = None):
     """Load predictor; for demo tool pass model_type in ('rf', 'lightgbm', 'xgboost')."""
-    return load_predictor(HANDOFF_DIR, model_type=model_type)
+    try:
+        return load_predictor(HANDOFF_DIR, model_type=model_type)
+    except TypeError:
+        # Backward compatibility: older load_predictor() may not accept model_type
+        return load_predictor(HANDOFF_DIR)
 
 # ============================================================================
 # PAGES

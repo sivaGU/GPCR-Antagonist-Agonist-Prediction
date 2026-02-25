@@ -32,13 +32,17 @@ def main():
         model_files.append(out_path)
         print(f"Created {out_path}")
 
-    # Demo tool: copy same dummies into demo_rf, demo_lightgbm, demo_xgboost
+    # Demo tool: copy same dummies + config into demo_rf, demo_lightgbm, demo_xgboost
     for sub in ("demo_rf", "demo_lightgbm", "demo_xgboost"):
         sub_dir = artifacts_dir / sub
         sub_dir.mkdir(exist_ok=True)
         for src in model_files:
             shutil.copy2(src, sub_dir / src.name)
-        print(f"Created {sub_dir} with {N_MODELS} models")
+        for config_name in ("feature_config.json", "threshold.json"):
+            src_config = artifacts_dir / config_name
+            if src_config.exists():
+                shutil.copy2(src_config, sub_dir / config_name)
+        print(f"Created {sub_dir} with {N_MODELS} models + config")
 
     print(f"\nDone! Created {N_MODELS} dummy model placeholders in {artifacts_dir}")
     print("Demo folders: demo_rf, demo_lightgbm, demo_xgboost")
