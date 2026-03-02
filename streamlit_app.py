@@ -706,20 +706,21 @@ def render_gpcr_prediction_page():
     st.title("GPCR Ligand Functional Activity Prediction")
     st.markdown(
         """
-        Predict GPCR Class A receptor-ligand functional activity. Choose a model, enter a receptor name and ligand (SMILES or structure file),
+        Predict GPCR Class A receptor-ligand functional activity. Choose a model, select a receptor and provide a ligand (SMILES or structure file),
         or upload a CSV file for batch processing. The model outputs probabilities for Agonist, Antagonist, and Inactive classes.
         
         **Input modes:** Single receptor-ligand pair | Batch (CSV with receptor and ligand columns)
         """
     )
 
-    st.sidebar.markdown("### Model")
-    model_type_label = st.sidebar.selectbox(
+    st.markdown("#### Select model")
+    model_type_label = st.selectbox(
         "Model type",
         ["Random Forest", "LightGBM", "XGBoost", "Ensemble"],
         key="gpcr_pred_model",
         help="Select which trained model to use for predictions.",
     )
+    st.caption("Choose **Random Forest**, **LightGBM**, **XGBoost**, or **Ensemble** for predictions.")
     model_type_map = {"Random Forest": "rf", "LightGBM": "lightgbm", "XGBoost": "xgboost", "Ensemble": "ensemble"}
     model_type = model_type_map[model_type_label]
 
