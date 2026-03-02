@@ -1,8 +1,6 @@
-# GPCR Class A Functional Activity ML Prediction GUI
+# GPCR Class A Functional Activity Prediction GUI
 
 A production-ready Streamlit GUI for predicting GPCR Class A receptor-ligand functional activity (Agonist/Antagonist/Inactive) using machine learning models.
-
-Link: https://gpcr-antagonist-agonist-prediction-8z7elmu8bdoa6cgrzoreyy.streamlit.app/
 
 ## Features
 
@@ -10,7 +8,10 @@ Link: https://gpcr-antagonist-agonist-prediction-8z7elmu8bdoa6cgrzoreyy.streamli
 - **Batch CSV prediction** — Upload a CSV with receptor and ligand columns, download results
 - **Multi-class classification** — Predicts Agonist, Antagonist, or Inactive
 - **Uncertainty quantification** — Provides error probabilities and confidence intervals
-- **Model support** — LightGBM, Random Forest, XGBoost (ensemble support)
+- **Model support** — LightGBM, Random Forest, XGBoost, Ensemble (four options in Demo Prediction Tool)
+- **Demo Prediction Tool** — Table comparing model predictions to experimental Agonist/Antagonist/Inactive values (RF / LightGBM / XGBoost / Ensemble)
+
+**Artifacts:** Trained models from `gpcr_artifacts` are integrated; the app is ready to run.
 
 ## Quick Start
 
@@ -35,21 +36,15 @@ pip install rdkit
 pip install lightgbm pandas numpy streamlit scikit-learn joblib xgboost
 ```
 
-### 3. Add ML artifacts
+### 3. Run the Streamlit GUI
 
-Place your trained model artifacts in the `artifacts/` folder:
-- Model files (`.pkl`, `.joblib`, or `.pth` formats)
-- `feature_config.json` (feature configuration)
-- `threshold.json` (classification thresholds, if applicable)
-- Receptor feature files (if needed)
-
-### 4. Run the Streamlit GUI
+*(Artifacts from `gpcr_artifacts` are already in `artifacts/`. To replace or add models later, see `artifacts/README.md`.)*
 
 ```bash
 streamlit run streamlit_app.py
 ```
 
-The app will open at `http://localhost:8501`.
+The app will open at `http://localhost:8501`. Use **Demo Prediction Tool** (predicted vs experimental table) or **GPCR Ligand Functional Activity Prediction** (single/batch).
 
 ## Project Structure
 
@@ -105,6 +100,3 @@ Based on the ML GPCR Class A Functional Activity Manuscript:
 ## Notes
 
 This GUI is designed to work with your trained ML models. Once you add your model artifacts to the `artifacts/` folder and update the `predict.py` module to match your feature extraction pipeline, the GUI will be ready to use.
-
-
-

@@ -249,22 +249,40 @@ class GPCRPredictor:
         )
 
 
-def load_predictor(artifact_dir: Union[str, Path]) -> GPCRPredictor:
+def load_predictor(
+    artifact_dir: Union[str, Path],
+    model_type: Optional[str] = None,
+) -> GPCRPredictor:
     """
     Load GPCR predictor from artifact directory.
+    
+    If model_type is "rf", "lightgbm", or "xgboost", looks in artifacts/demo_{model_type}/
+    first, then falls back to artifacts/.
     
     Expected structure:
     artifacts/
         model_seed0.pkl (or .joblib)
-        model_seed1.pkl
         ...
-        feature_config.json
-        threshold.json (optional)
+    or artifacts/demo_rf/, artifacts/demo_lightgbm/, artifacts/demo_xgboost/
     """
     base = Path(artifact_dir)
     art = base / "artifacts"
     if not art.exists():
         art = base
+    
+    # Demo tool: try model-type-specific folder first
+    if model_type and model_type.lower() in ("rf", "random_forest", "lightgbm", "lgb", "xgboost", "xgb", "ensemble"):
+        mt = model_type.lower()
+        if mt in ("rf", "random_forest"):
+            demo_dir = art / "demo_rf"
+        elif mt in ("lightgbm", "lgb"):
+            demo_dir = art / "demo_lightgbm"
+        elif mt in ("xgboost", "xgb"):
+            demo_dir = art / "demo_xgboost"
+        else:
+            demo_dir = art / "demo_ensemble"
+        if demo_dir.exists():
+            art = demo_dir
     
     # Load models
     models = []

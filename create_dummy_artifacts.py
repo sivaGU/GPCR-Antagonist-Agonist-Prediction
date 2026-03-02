@@ -32,8 +32,8 @@ def main():
         model_files.append(out_path)
         print(f"Created {out_path}")
 
-    # Demo tool: copy same dummies + config into demo_rf, demo_lightgbm, demo_xgboost
-    for sub in ("demo_rf", "demo_lightgbm", "demo_xgboost"):
+    # Demo tool: copy same dummies + config into demo_rf, demo_lightgbm, demo_xgboost, demo_ensemble
+    for sub in ("demo_rf", "demo_lightgbm", "demo_xgboost", "demo_ensemble"):
         sub_dir = artifacts_dir / sub
         sub_dir.mkdir(exist_ok=True)
         for src in model_files:
@@ -45,7 +45,7 @@ def main():
         print(f"Created {sub_dir} with {N_MODELS} models + config")
 
     print(f"\nDone! Created {N_MODELS} dummy model placeholders in {artifacts_dir}")
-    print("Demo folders: demo_rf, demo_lightgbm, demo_xgboost")
+    print("Demo folders: demo_rf, demo_lightgbm, demo_xgboost, demo_ensemble")
     print("Replace these with your trained models when ready.")
 
 if __name__ == "__main__":

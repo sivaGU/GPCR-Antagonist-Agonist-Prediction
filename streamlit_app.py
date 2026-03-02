@@ -29,7 +29,7 @@ from src.gpcr.predict import predict_single, predict_batch, load_predictor
 # Data paths for demo tool
 DATA_DIR = PROJECT_ROOT / "data"
 RECEPTORS_FILE = DATA_DIR / "gpcr_class_a_receptors.txt"
-LIGANDS_FILE = DATA_DIR / "study_ligands.csv"
+DEMO_REFERENCE_FILE = DATA_DIR / "demo_reference.csv"
 
 
 def extract_smiles_from_file(file_content: bytes, file_extension: str) -> Optional[str]:
@@ -476,7 +476,7 @@ def render_home_page():
     st.markdown("## Quick start")
 
     st.info(
-        "**Ready to predict!** Use **Demo Prediction Tool** to run study ligands against Class A receptors, "
+        "**Ready to predict!** Use **Demo Prediction Tool** to compare predictions to experimental values (Agonist/Antagonist/Inactive), "
         "or **GPCR Ligand Functional Activity Prediction** for single/batch predictions."
     )
 
@@ -486,7 +486,7 @@ def render_home_page():
         ### Navigation
         - **Home:** This overview
         - **Documentation:** Setup, model details, and usage
-        - **Demo Prediction Tool:** Study ligands × receptors with RF/LightGBM/XGBoost
+        - **Demo Prediction Tool:** Predicted vs experimental comparison table (RF/LightGBM/XGBoost/Ensemble)
         - **GPCR Ligand Functional Activity Prediction:** Run predictions (receptor + ligand)
         """
     )
@@ -594,95 +594,100 @@ def render_documentation_page():
     st.success("Questions? Refer to the ML GPCR Class A Functional Activity Manuscript for model details.")
 
 
-def _load_demo_data():
-    """Load receptor list and study ligands for demo tool. Cached per session."""
-    receptors = []
-    if RECEPTORS_FILE.exists():
-        receptors = [line.strip() for line in RECEPTORS_FILE.read_text(encoding="utf-8").splitlines() if line.strip()]
-    ligands_df = pd.DataFrame()
-    if LIGANDS_FILE.exists():
-        try:
-            ligands_df = pd.read_csv(LIGANDS_FILE, encoding="utf-8")
-        except pd.errors.ParserError:
-            ligands_df = pd.read_csv(LIGANDS_FILE, encoding="utf-8", engine="python", on_bad_lines="skip")
-    return receptors, ligands_df
+def _load_demo_reference():
+    """Load demo reference data (receptor, ligand, experimental_class) for comparison table."""
+    if not DEMO_REFERENCE_FILE.exists():
+        return pd.DataFrame()
+    try:
+        df = pd.read_csv(DEMO_REFERENCE_FILE, encoding="utf-8")
+    except pd.errors.ParserError:
+        df = pd.read_csv(DEMO_REFERENCE_FILE, encoding="utf-8", engine="python", on_bad_lines="skip")
+    return df
 
 
 def render_demo_prediction_page():
-    """Render the Demo Prediction Tool page."""
+    """Render the Demo Prediction Tool page: predicted vs experimental comparison table."""
     st.title("Demo Prediction Tool")
     st.caption(
-        "Run predicted functional activity for study ligands against a selected GPCR Class A receptor "
-        "using Random Forest, LightGBM, or XGBoost."
+        "Compare model predictions to experimental values (Agonist / Antagonist / Inactive) "
+        "using Random Forest, LightGBM, XGBoost, or Ensemble."
     )
 
-    receptors, ligands_df = _load_demo_data()
-    if not receptors:
-        st.warning("Receptor list not found. Add data/gpcr_class_a_receptors.txt")
-        return
-    if ligands_df.empty or "smiles" not in ligands_df.columns:
-        st.warning("Study ligands not found or missing 'smiles' column. Add data/study_ligands.csv")
+    ref_df = _load_demo_reference()
+    if ref_df.empty or "smiles" not in ref_df.columns or "experimental_class" not in ref_df.columns:
+        st.warning(
+            "Demo reference data not found or missing columns. Add data/demo_reference.csv with columns: "
+            "receptor, name, smiles, experimental_class (Agonist/Antagonist/Inactive)."
+        )
         return
 
-    n_ligands = len(ligands_df)
     st.sidebar.markdown("### Demo settings")
-    selected_receptor = st.sidebar.selectbox(
-        "GPCR Class A Receptor",
-        options=receptors,
-        index=min(5, len(receptors) - 1) if receptors else 0,
-        key="demo_receptor",
-    )
     model_type_label = st.sidebar.selectbox(
         "Model",
-        options=["Random Forest", "LightGBM", "XGBoost"],
+        options=["Random Forest", "LightGBM", "XGBoost", "Ensemble"],
         index=0,
         key="demo_model",
     )
-    model_type_map = {"Random Forest": "rf", "LightGBM": "lightgbm", "XGBoost": "xgboost"}
+    model_type_map = {"Random Forest": "rf", "LightGBM": "lightgbm", "XGBoost": "xgboost", "Ensemble": "ensemble"}
     model_type = model_type_map[model_type_label]
-
-    st.markdown(f"**Receptor:** {selected_receptor} · **Model:** {model_type_label} · **Ligands:** {n_ligands}")
 
     try:
         predictor = get_predictor(model_type)
     except Exception as e:
         st.error(f"Could not load {model_type_label} model: {e}")
         st.info(
-            "Ensure artifacts/demo_rf, artifacts/demo_lightgbm, and/or artifacts/demo_xgboost exist with model_seed*.pkl. "
-            "Run: python create_dummy_artifacts.py"
+            "Ensure artifacts/demo_rf, demo_lightgbm, demo_xgboost, and/or demo_ensemble exist with model_seed*.pkl."
         )
         return
 
-    if st.button("Run predictions", type="primary", key="demo_run"):
-        pairs = [(selected_receptor, str(row["smiles"])) for _, row in ligands_df.iterrows()]
-        with st.spinner(f"Predicting {n_ligands} ligands for {selected_receptor}..."):
-            results = predict_batch(pairs, predictor=predictor)
+    # Run predictions for all reference rows
+    pairs = [(str(row["receptor"]), str(row["smiles"])) for _, row in ref_df.iterrows()]
+    with st.spinner(f"Running {model_type_label} on {len(ref_df)} reference compounds..."):
+        results = predict_batch(pairs, predictor=predictor)
 
-        out = ligands_df.copy()
-        out["receptor"] = selected_receptor
-        out["predicted_class"] = [r.predicted_class for r in results]
-        out["class_id"] = [r.class_id for r in results]
-        out["prob_agonist"] = [r.prob_agonist for r in results]
-        out["prob_antagonist"] = [r.prob_antagonist for r in results]
-        out["prob_inactive"] = [r.prob_inactive for r in results]
-        out["prob_std_error"] = [r.prob_std_error if r.prob_std_error is not None else "" for r in results]
-        out["canonical_smiles"] = [r.canonical_smiles for r in results]
-        out["error"] = [r.error for r in results]
+    # Build comparison table: experimental vs predicted
+    out = ref_df[["receptor", "name", "smiles", "experimental_class"]].copy()
+    out["predicted_class"] = [r.predicted_class for r in results]
+    out["P(Agonist)"] = [round(r.prob_agonist, 4) for r in results]
+    out["P(Antagonist)"] = [round(r.prob_antagonist, 4) for r in results]
+    out["P(Inactive)"] = [round(r.prob_inactive, 4) for r in results]
+    out["match"] = [
+        "✓" if str(row["experimental_class"]).strip().lower() == str(row["predicted_class"]).strip().lower() else "✗"
+        for _, row in out.iterrows()
+    ]
+    out = out.rename(columns={"match": "Match"})
 
-        st.subheader("Results")
-        st.dataframe(out, use_container_width=True, height=400)
-        st.download_button(
-            "Download results (CSV)",
-            out.to_csv(index=False),
-            f"demo_{selected_receptor}_{model_type}_{n_ligands}ligands.csv",
-            "text/csv",
-            key="demo_download",
-        )
+    st.markdown(f"**Model:** {model_type_label} · **Reference compounds:** {len(ref_df)}")
 
-    st.divider()
-    st.markdown("#### Study ligands (preview)")
-    st.dataframe(ligands_df.head(20), use_container_width=True)
-    st.caption(f"Showing 20 of {n_ligands} ligands. Full set used when you click **Run predictions**.")
+    # Summary metrics
+    n_match = out["Match"].eq("✓").sum()
+    accuracy = n_match / len(out) * 100 if len(out) else 0
+    st.metric("Agreement with experiment", f"{n_match} / {len(out)} ({accuracy:.1f}%)")
+
+    st.subheader("Predicted vs experimental")
+    st.dataframe(
+        out[
+            [
+                "receptor",
+                "name",
+                "experimental_class",
+                "predicted_class",
+                "P(Agonist)",
+                "P(Antagonist)",
+                "P(Inactive)",
+                "Match",
+            ]
+        ],
+        use_container_width=True,
+        height=400,
+    )
+    st.download_button(
+        "Download comparison (CSV)",
+        out.to_csv(index=False),
+        f"demo_predicted_vs_experimental_{model_type}.csv",
+        "text/csv",
+        key="demo_download",
+    )
 
 
 def render_gpcr_prediction_page():
