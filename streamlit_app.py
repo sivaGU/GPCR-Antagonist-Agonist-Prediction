@@ -695,28 +695,38 @@ def render_gpcr_prediction_page():
     st.title("GPCR Ligand Functional Activity Prediction")
     st.markdown(
         """
-        Predict GPCR Class A receptor-ligand functional activity. Enter a receptor name and ligand (SMILES or structure file),
+        Predict GPCR Class A receptor-ligand functional activity. Choose a model, enter a receptor name and ligand (SMILES or structure file),
         or upload a CSV file for batch processing. The model outputs probabilities for Agonist, Antagonist, and Inactive classes.
         
         **Input modes:** Single receptor-ligand pair | Batch (CSV with receptor and ligand columns)
         """
     )
 
+    st.sidebar.markdown("### Model")
+    model_type_label = st.sidebar.selectbox(
+        "Model type",
+        ["Random Forest", "LightGBM", "XGBoost", "Ensemble"],
+        key="gpcr_pred_model",
+        help="Select which trained model to use for predictions.",
+    )
+    model_type_map = {"Random Forest": "rf", "LightGBM": "lightgbm", "XGBoost": "xgboost", "Ensemble": "ensemble"}
+    model_type = model_type_map[model_type_label]
+
     try:
-        predictor = get_predictor(None)
+        predictor = get_predictor(model_type)
     except Exception as e:
-        st.error(f"Could not load model: {e}")
+        st.error(f"Could not load {model_type_label} model: {e}")
         st.info(
-            "Ensure the **artifacts/** folder contains:\n"
+            "Ensure the **artifacts/** folder contains demo subfolders (e.g. **artifacts/demo_rf/**) with:\n"
             "- Model files (model_seed*.pkl or model_seed*.joblib)\n"
-            "- feature_config.json (optional)\n"
-            "- threshold.json (optional)\n\n"
-            "**Note:** You also need to implement receptor feature extraction in `src/gpcr/predict.py`"
+            "- feature_config.json\n"
+            "- threshold.json"
         )
         return
 
     st.sidebar.markdown("### Model Info")
     st.sidebar.info(
+        f"**Model:** {model_type_label}\n\n"
         f"**Loaded:** {len(predictor.models)} model(s)\n\n"
         f"**Classes:** {', '.join(predictor.class_names)}"
     )
