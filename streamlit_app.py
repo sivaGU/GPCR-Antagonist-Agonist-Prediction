@@ -594,6 +594,17 @@ def render_documentation_page():
     st.success("Questions? Refer to the ML GPCR Class A Functional Activity Manuscript for model details.")
 
 
+def _load_receptor_list():
+    """Load GPCR Class A receptor names from data file for dropdown selection."""
+    if not RECEPTORS_FILE.exists():
+        return []
+    try:
+        lines = RECEPTORS_FILE.read_text(encoding="utf-8").strip().splitlines()
+        return [s.strip() for s in lines if s.strip()]
+    except Exception:
+        return []
+
+
 def _load_demo_reference():
     """Load demo reference data (receptor, ligand, experimental_class) for comparison table."""
     if not DEMO_REFERENCE_FILE.exists():
@@ -741,12 +752,18 @@ def render_gpcr_prediction_page():
     )
 
     if input_mode == "Single receptor-ligand pair":
-        receptor_input = st.text_input(
-            "GPCR Class A Receptor Name",
-            placeholder="e.g. ADRB2, ADRB1, DRD2",
+        receptors = _load_receptor_list()
+        if not receptors:
+            st.warning("GPCR Class A receptor list not found (data/gpcr_class_a_receptors.txt). Add it to enable receptor selection.")
+        receptor_options = ["Select receptor..."] + (receptors if receptors else [])
+        receptor_input = st.selectbox(
+            "GPCR Class A Receptor",
+            options=receptor_options,
             key="receptor_input",
+            help="Select the receptor to predict functional activity for.",
         )
-        
+        receptor_selected = receptor_input if (receptor_input and receptor_input != "Select receptor...") else ""
+
         ligand_input = st.text_input(
             "Ligand SMILES (or upload a structure file below)",
             placeholder="e.g. CCO, c1ccccc1",
@@ -781,9 +798,9 @@ def render_gpcr_prediction_page():
             st.session_state.structure_file_ext = None
         
         if st.button("Predict", type="primary", key="btn_single"):
-            if receptor_input and receptor_input.strip() and ligand_to_use:
+            if receptor_selected and ligand_to_use:
                 result = predict_single(
-                    receptor_input.strip(),
+                    receptor_selected,
                     ligand_to_use,
                     predictor=predictor,
                 )
@@ -874,7 +891,7 @@ def render_gpcr_prediction_page():
                 else:
                     st.error(result.error)
             else:
-                st.warning("Please enter a receptor name and ligand SMILES or upload a structure file.")
+                st.warning("Please select a GPCR Class A receptor and provide ligand SMILES or upload a structure file.")
 
     else:
         uploaded_file = st.file_uploader(
