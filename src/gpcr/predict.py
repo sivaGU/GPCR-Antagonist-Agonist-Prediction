@@ -171,6 +171,11 @@ def _aggregate_receptor_feature_dict(receptor_name: str) -> Optional[Dict[str, f
     return feats
 
 
+def _zero_receptor_feature_dict() -> Dict[str, float]:
+    """Fallback receptor feature dict when pocket files are unavailable."""
+    return {k: 0.0 for k in RECEPTOR_FEATURE_ORDER}
+
+
 def get_available_receptors() -> List[str]:
     """Return receptor list from external GPCRtryagain folder."""
     root = _resolve_gpcr_data_root()
@@ -184,7 +189,7 @@ def _get_receptor_features(receptor_name: str) -> Optional[np.ndarray]:
     """Extract manuscript-style 31 receptor pocket features for a receptor."""
     feats = _aggregate_receptor_feature_dict(receptor_name)
     if feats is None:
-        return None
+        feats = _zero_receptor_feature_dict()
     return np.array([float(feats.get(key, 0.0)) for key in RECEPTOR_FEATURE_ORDER], dtype=np.float32)
 
 
@@ -275,8 +280,10 @@ def _compute_full_features(receptor_name: str, ligand_smiles: str) -> Optional[n
 
     receptor_dict = _aggregate_receptor_feature_dict(receptor_name)
     receptor_feats = _get_receptor_features(receptor_name)
-    if receptor_feats is None or receptor_dict is None:
+    if receptor_feats is None:
         return None
+    if receptor_dict is None:
+        receptor_dict = _zero_receptor_feature_dict()
 
     interaction_feats = _compute_interaction_features(ligand_core, receptor_dict)
     return np.hstack([ligand_feats, receptor_feats, interaction_feats])
@@ -420,7 +427,15 @@ def load_predictor(
     if not art.exists():
         art = base
     
-    # Demo tool: try model-type-specific folder first
+    def _discover_model_files(folder: Path) -> List[Path]:
+        files = list(folder.glob("model_seed*.pkl")) + list(folder.glob("model_seed*.joblib"))
+        if not files:
+            files = list(folder.glob("*.pkl")) + list(folder.glob("*.joblib"))
+        return sorted(files)
+
+    selected_art = art
+
+    # Demo tool: try model-type-specific folder first, only if it has model files
     if model_type and model_type.lower() in ("rf", "random_forest", "lightgbm", "lgb", "xgboost", "xgb", "ensemble"):
         mt = model_type.lower()
         if mt in ("rf", "random_forest"):
@@ -431,16 +446,16 @@ def load_predictor(
             demo_dir = art / "demo_xgboost"
         else:
             demo_dir = art / "demo_ensemble"
-        if demo_dir.exists():
-            art = demo_dir
-    
+        if demo_dir.exists() and _discover_model_files(demo_dir):
+            selected_art = demo_dir
+
     # Load models
     models = []
-    model_files = list(art.glob("model_seed*.pkl")) + list(art.glob("model_seed*.joblib"))
-    
-    if not model_files:
-        # Try alternative naming
-        model_files = list(art.glob("*.pkl")) + list(art.glob("*.joblib"))
+    model_files = _discover_model_files(selected_art)
+    if not model_files and selected_art != art:
+        # Fallback to base artifacts if selected demo folder has no models.
+        selected_art = art
+        model_files = _discover_model_files(selected_art)
     
     for model_file in sorted(model_files):
         try:
@@ -450,7 +465,7 @@ def load_predictor(
     
     if not models:
         raise FileNotFoundError(
-            f"No model files found in {art}. "
+            f"No model files found in {selected_art}. "
             f"Expected: model_seed*.pkl or model_seed*.joblib"
         )
     
@@ -458,14 +473,14 @@ def load_predictor(
     class_names = ["Agonist", "Antagonist", "Inactive"]
     threshold = None
     
-    config_path = art / "feature_config.json"
+    config_path = selected_art / "feature_config.json"
     if config_path.exists():
         import json
         with open(config_path, "r") as f:
             config = json.load(f)
             class_names = config.get("class_names", class_names)
     
-    threshold_path = art / "threshold.json"
+    threshold_path = selected_art / "threshold.json"
     if threshold_path.exists():
         import json
         with open(threshold_path, "r") as f:

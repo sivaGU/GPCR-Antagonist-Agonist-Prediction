@@ -312,8 +312,7 @@ def render_home_page():
     st.markdown("## Quick start")
 
     st.info(
-        "**Ready to predict!** Use **Demo Prediction Tool** to compare predictions to experimental values (Agonist/Antagonist/Inactive), "
-        "or **GPCR Ligand Functional Activity Prediction** for single/batch predictions."
+        "**Ready to predict!** Use **GPCR Ligand Functional Activity Prediction** for single or batch predictions."
     )
 
     st.markdown(
@@ -322,7 +321,6 @@ def render_home_page():
         ### Navigation
         - **Home:** This overview
         - **Documentation:** Setup, model details, and usage
-        - **Demo Prediction Tool:** Predicted vs experimental comparison table (RF/LightGBM/XGBoost/Ensemble)
         - **GPCR Ligand Functional Activity Prediction:** Run predictions (receptor + ligand)
         """
     )
@@ -821,9 +819,6 @@ def main():
     if st.sidebar.button("Documentation", use_container_width=True, key="nav_docs"):
         st.session_state.current_page = "Documentation"
 
-    if st.sidebar.button("Demo Prediction Tool", use_container_width=True, key="nav_demo"):
-        st.session_state.current_page = "Demo Prediction Tool"
-
     if st.sidebar.button("GPCR Ligand Functional Activity Prediction", use_container_width=True, key="nav_prediction"):
         st.session_state.current_page = "GPCR Ligand Functional Activity Prediction"
 
@@ -833,8 +828,6 @@ def main():
         render_home_page()
     elif st.session_state.current_page == "Documentation":
         render_documentation_page()
-    elif st.session_state.current_page == "Demo Prediction Tool":
-        render_demo_prediction_page()
     elif st.session_state.current_page == "GPCR Ligand Functional Activity Prediction":
         render_gpcr_prediction_page()
 
