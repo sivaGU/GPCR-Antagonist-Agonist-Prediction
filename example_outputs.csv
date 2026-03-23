@@ -1,5 +1,0 @@
-receptor,ligand,canonical_smiles,predicted_class,class_id,prob_agonist,prob_antagonist,prob_inactive,prob_std_error,prob_std_error_pct,error
-ADRB2,CCO,CCO,Agonist,0,0.6500,0.2500,0.1000,0.0123,1.23%,
-ADRB2,c1ccccc1,c1ccccc1,Antagonist,1,0.2000,0.6000,0.2000,0.0156,1.56%,
-ADRB1,CCO,CCO,Agonist,0,0.7000,0.2000,0.1000,0.0100,1.00%,
-DRD2,CCN(CC)CC,CCN(CC)CC,Inactive,2,0.1000,0.2000,0.7000,0.0200,2.00%,
