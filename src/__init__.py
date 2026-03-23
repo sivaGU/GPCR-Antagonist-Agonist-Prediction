@@ -1,1 +1,0 @@
-# GPCR GUI package
