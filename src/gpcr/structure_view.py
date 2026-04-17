@@ -1,10 +1,9 @@
 """
-GPCR receptor + ligand 3D viewer (py3Dmol), styled after MBind's complex viewer.
+GPCR receptor + query-ligand 3D viewer (py3Dmol), styled after MBind's complex viewer.
 
-This is not AutoDock/Vina docking: the query ligand is embedded in 3D with RDKit
-and translated so its heavy-atom centroid matches the co-crystal reference
-ligand in the receptor folder (orthosteric site proxy). Use for visualization
-alongside ML functional-activity predictions.
+Not AutoDock/Vina docking: the query ligand is embedded in 3D with RDKit and translated
+so its heavy-atom centroid matches the co-crystal binding-site center (from *_ligand_only.pdb
+when present). The native ligand is not drawn—only receptor cartoon + user ligand sticks.
 """
 from __future__ import annotations
 
@@ -126,11 +125,10 @@ def smiles_to_pdb_block_aligned(
 def build_gpcr_complex_view_html(
     receptor_pdb_text: str,
     query_ligand_pdb_text: str,
-    reference_ligand_pdb_text: Optional[str] = None,
     width: int = 720,
     height: int = 520,
 ) -> Optional[str]:
-    """MBind-style py3Dmol HTML: receptor cartoon + optional grey reference + green query ligand."""
+    """MBind-style py3Dmol HTML: receptor cartoon + query ligand sticks only (no co-crystal ligand)."""
     if py3Dmol is None:
         return None
     if not receptor_pdb_text.strip() or not query_ligand_pdb_text.strip():
@@ -139,13 +137,8 @@ def build_gpcr_complex_view_html(
         view = py3Dmol.view(width=width, height=height)
         view.addModel(receptor_pdb_text, "pdb")
         view.setStyle({"model": 0}, {"cartoon": {"color": f"0x{RECEPTOR_CARTOON_HEX}"}})
-        mid = 1
-        if reference_ligand_pdb_text and reference_ligand_pdb_text.strip():
-            view.addModel(reference_ligand_pdb_text, "pdb")
-            view.setStyle({"model": mid}, {"stick": {"radius": 0.08, "colorscheme": "greyCarbon"}})
-            mid += 1
         view.addModel(query_ligand_pdb_text, "pdb")
-        view.setStyle({"model": mid}, {"stick": {"radius": 0.13, "colorscheme": "greenCarbon"}})
+        view.setStyle({"model": 1}, {"stick": {"radius": 0.13, "colorscheme": "greenCarbon"}})
         view.zoomTo()
         return view._make_html()
     except Exception:
@@ -172,8 +165,8 @@ def build_aligned_complex_html_for_receptor(
     query_pdb = smiles_to_pdb_block_aligned(canonical_smiles, target_com)
     if not query_pdb:
         return None, "RDKit could not build a 3D conformer for this SMILES."
-    ref_for_view = ref_text if ref_text.strip() else None
-    html = build_gpcr_complex_view_html(rec_text, query_pdb, ref_for_view, width=width, height=height)
+    # Reference ligand PDB is used only for binding-site centroid; not rendered in the viewer.
+    html = build_gpcr_complex_view_html(rec_text, query_pdb, width=width, height=height)
     if html is None:
         if py3Dmol is None:
             return None, "Install py3Dmol for the 3D viewer: pip install py3Dmol"

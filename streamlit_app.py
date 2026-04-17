@@ -56,13 +56,9 @@ def _ensure_default_gpcr_data_root() -> None:
 
 _ensure_default_gpcr_data_root()
 
-import io
-import urllib.request
-import urllib.parse
 import streamlit as st
 import pandas as pd
 from rdkit import Chem
-from rdkit.Chem import AllChem
 
 from src.gpcr.predict import (
     predict_single,
@@ -148,87 +144,6 @@ def extract_smiles_from_file(file_content: bytes, file_extension: str) -> Option
     except Exception:
         pass
     return None
-
-
-def fetch_structure_image_from_database(smiles: str, width: int = 400, height: int = 400) -> Optional[bytes]:
-    """
-    Fetch a 2D structure image for the given SMILES from the NCI CACTUS
-    Chemical Identifier Resolver. Returns PNG image bytes or None on failure.
-    """
-    if not smiles or not str(smiles).strip():
-        return None
-    try:
-        encoded = urllib.parse.quote(str(smiles).strip(), safe="")
-        url = (
-            f"https://cactus.nci.nih.gov/chemical/structure/{encoded}/image"
-            f"?width={width}&height={height}&format=png"
-        )
-        req = urllib.request.Request(url, headers={"User-Agent": "GPCR-GUI/1.0"})
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            if resp.status != 200:
-                return None
-            data = resp.read()
-            if not data or len(data) < 100:
-                return None
-            return data
-    except Exception:
-        return None
-
-
-def get_mol_for_drawing(smiles: Optional[str] = None, file_content: Optional[bytes] = None, file_extension: Optional[str] = None):
-    """
-    Get an RDKit mol for 2D structure drawing (no 3D embedding required).
-    Uses uploaded file if present, else SMILES. Returns Chem.Mol or None.
-    """
-    mol = None
-    if file_content is not None and file_extension is not None:
-        ext = file_extension.lower()
-        try:
-            text = file_content.decode("utf-8")
-            if ext == ".sdf":
-                from io import StringIO
-                supplier = Chem.SDMolSupplier(StringIO(text))
-                mols = [m for m in supplier if m is not None]
-                mol = mols[0] if mols else None
-            elif ext == ".mol":
-                mol = Chem.MolFromMolBlock(text)
-            elif ext in (".pdb", ".pdbqt"):
-                mol = Chem.MolFromPDBBlock(text)
-            elif ext == ".mol2":
-                mol = Chem.MolFromMol2Block(text)
-        except Exception:
-            mol = None
-    if mol is None and smiles is not None:
-        smiles_str = str(smiles).strip()
-        if smiles_str:
-            mol = Chem.MolFromSmiles(smiles_str)
-    return mol
-
-
-def render_ligand_structure(mol, size: int = 400) -> Optional[bytes]:
-    """
-    Draw the ligand as a 2D chemical structure (atoms and bonds) using RDKit.
-    Returns PNG image bytes or None on failure. Used as fallback when database lookup fails.
-    """
-    if mol is None:
-        return None
-    try:
-        from rdkit.Chem import Draw
-        try:
-            AllChem.Compute2DCoords(mol)
-        except Exception:
-            pass
-        img = Draw.MolToImage(mol, size=(size, size))
-        if img is None:
-            return None
-        buf = io.BytesIO()
-        if hasattr(img, "mode") and img.mode not in ("RGB", "L"):
-            img = img.convert("RGB")
-        img.save(buf, format="PNG")
-        buf.seek(0)
-        return buf.getvalue()
-    except Exception:
-        return None
 
 
 # ============================================================================
@@ -686,25 +601,19 @@ def render_gpcr_prediction_page():
             extracted = extract_smiles_from_file(content, ext)
             if extracted:
                 ligand_to_use = extracted
-                st.session_state.structure_file_content = content
-                st.session_state.structure_file_ext = ext
                 st.success(f"Extracted SMILES from {structure_file.name}")
             else:
-                st.session_state.structure_file_content = None
-                st.session_state.structure_file_ext = None
                 st.error(f"Could not extract SMILES from {ext.upper()} file. Try SMILES input instead.")
         elif ligand_input and ligand_input.strip():
             ligand_to_use = ligand_input.strip()
-            st.session_state.structure_file_content = None
-            st.session_state.structure_file_ext = None
 
         show_3d_complex = st.checkbox(
-            "After prediction, show 3D receptor + ligand (MBind-style py3Dmol viewer)",
+            "After prediction, show 3D receptor + your ligand (py3Dmol)",
             value=True,
             key="chk_show_3d_complex",
-            help="Receptor cartoon (tan) + co-crystal ligand (grey) + your compound (green), "
-            "with your ligand centroid aligned to the orthosteric reference ligand. "
-            "Illustrative geometry only — not a docking score.",
+            help="Tan receptor cartoon plus your compound (green sticks) in the orthosteric region. "
+            "Pose is RDKit-generated with centroid aligned to the structure’s binding site; "
+            "the co-crystal ligand is not shown. Not a docking score.",
         )
 
         if st.button("Predict", type="primary", key="btn_single"):
@@ -774,37 +683,13 @@ def render_gpcr_prediction_page():
                             f"**Prediction Range:** Highest probability = {prob_max:.4f} ± {result.prob_std_error:.4f} "
                             f"(95% confidence interval: [{ci_lower:.4f}, {ci_upper:.4f}])"
                         )
-                    
-                    # Ligand structure visualization
-                    st.subheader("Ligand Structure")
-                    smiles_for_lookup = (result.canonical_smiles or result.ligand_smiles or "").strip()
-                    img_bytes = fetch_structure_image_from_database(smiles_for_lookup) if smiles_for_lookup else None
-                    source_label = "NCI CACTUS Chemical Structure Resolver"
-                    if img_bytes is None:
-                        file_content = st.session_state.get("structure_file_content")
-                        file_ext = st.session_state.get("structure_file_ext")
-                        mol = get_mol_for_drawing(
-                            smiles_for_lookup if smiles_for_lookup else None,
-                            file_content=file_content,
-                            file_extension=file_ext,
-                        )
-                        img_bytes = render_ligand_structure(mol) if mol else None
-                        source_label = "RDKit (database lookup unavailable)"
-                    if img_bytes:
-                        st.image(io.BytesIO(img_bytes), use_container_width=False, width=400)
-                        st.caption(f"2D structure · Source: {source_label}")
-                    else:
-                        st.warning(
-                            "Could not retrieve or draw structure for this molecule."
-                            + (f" (SMILES: {result.canonical_smiles})" if result.canonical_smiles else "")
-                        )
 
                     if show_3d_complex and receptor_selected and result.canonical_smiles:
                         st.subheader("3D receptor + ligand")
                         st.caption(
-                            "Tan cartoon: receptor (PDB). Grey sticks: co-crystal reference ligand in the structure. "
-                            "Green sticks: your input compound, centroid-aligned to the reference ligand (same visual "
-                            "language as MBind; not an AutoDock/Vina pose)."
+                            "Tan cartoon: receptor (PDB). Green sticks: your input compound only (co-crystal ligand "
+                            "is not displayed). Centroid placement uses the orthosteric site from the structure; "
+                            "illustrative geometry, not AutoDock/Vina docking."
                         )
                         if not py3dmol_available():
                             st.info("Install **py3Dmol** to enable this panel: `pip install py3Dmol`")
