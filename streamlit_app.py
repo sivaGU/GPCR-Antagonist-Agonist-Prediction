@@ -623,6 +623,71 @@ def render_gpcr_prediction_page():
             "a top docking pose."
         )
 
+        def _render_single_prediction_from_session(pred: dict) -> None:
+            """Render persisted single-prediction outputs so docking reruns do not reset the panel."""
+            st.success("Valid input")
+
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Predicted Class", str(pred["predicted_class"]))
+            with col2:
+                st.metric("Receptor", str(pred["receptor"]))
+            with col3:
+                st.metric("Class ID", int(pred["class_id"]))
+
+            st.subheader("Probability Distributions")
+            prob_col1, prob_col2, prob_col3 = st.columns(3)
+            with prob_col1:
+                st.metric("P(Agonist)", f"{float(pred['prob_agonist']):.4f}")
+            with prob_col2:
+                st.metric("P(Antagonist)", f"{float(pred['prob_antagonist']):.4f}")
+            with prob_col3:
+                st.metric("P(Inactive)", f"{float(pred['prob_inactive']):.4f}")
+
+            import plotly.graph_objects as go
+            fig = go.Figure(
+                data=[
+                    go.Bar(
+                        x=["Agonist", "Antagonist", "Inactive"],
+                        y=[float(pred["prob_agonist"]), float(pred["prob_antagonist"]), float(pred["prob_inactive"])],
+                        marker_color=["#7E57C2", "#673AB7", "#512DA8"],
+                        text=[
+                            f"{float(pred['prob_agonist']):.3f}",
+                            f"{float(pred['prob_antagonist']):.3f}",
+                            f"{float(pred['prob_inactive']):.3f}",
+                        ],
+                        textposition="auto",
+                    )
+                ]
+            )
+            fig.update_layout(
+                title="Class Probability Distribution",
+                xaxis_title="Class",
+                yaxis_title="Probability",
+                yaxis_range=[0, 1],
+                height=400,
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+            std_err = pred.get("prob_std_error")
+            if std_err is not None:
+                std_err = float(std_err)
+                st.markdown("#### Uncertainty Analysis")
+                err_col1, err_col2, err_col3 = st.columns(3)
+                with err_col1:
+                    st.metric("Standard Error", f"± {std_err * 100:.2f}%")
+                prob_max = max(float(pred["prob_agonist"]), float(pred["prob_antagonist"]), float(pred["prob_inactive"]))
+                ci_lower = max(0.0, prob_max - 2 * std_err)
+                ci_upper = min(1.0, prob_max + 2 * std_err)
+                with err_col2:
+                    st.metric("95% CI Lower", f"{ci_lower:.4f}")
+                with err_col3:
+                    st.metric("95% CI Upper", f"{ci_upper:.4f}")
+                st.info(
+                    f"**Prediction Range:** Highest probability = {prob_max:.4f} ± {std_err:.4f} "
+                    f"(95% confidence interval: [{ci_lower:.4f}, {ci_upper:.4f}])"
+                )
+
         if st.button("Predict", type="primary", key="btn_single"):
             if receptor_selected and ligand_to_use:
                 result = predict_single(
@@ -643,64 +708,6 @@ def render_gpcr_prediction_page():
                         "prob_std_error": float(result.prob_std_error) if result.prob_std_error is not None else None,
                     }
                     st.session_state.pop("last_docking_result", None)
-                    
-                    # Main prediction
-                    col1, col2, col3 = st.columns(3)
-                    with col1:
-                        st.metric("Predicted Class", result.predicted_class)
-                    with col2:
-                        st.metric("Receptor", result.receptor)
-                    with col3:
-                        st.metric("Class ID", result.class_id)
-                    
-                    # Probability distributions
-                    st.subheader("Probability Distributions")
-                    prob_col1, prob_col2, prob_col3 = st.columns(3)
-                    with prob_col1:
-                        st.metric("P(Agonist)", f"{result.prob_agonist:.4f}")
-                    with prob_col2:
-                        st.metric("P(Antagonist)", f"{result.prob_antagonist:.4f}")
-                    with prob_col3:
-                        st.metric("P(Inactive)", f"{result.prob_inactive:.4f}")
-                    
-                    # Visualize probabilities
-                    import plotly.graph_objects as go
-                    fig = go.Figure(data=[
-                        go.Bar(
-                            x=['Agonist', 'Antagonist', 'Inactive'],
-                            y=[result.prob_agonist, result.prob_antagonist, result.prob_inactive],
-                            marker_color=['#7E57C2', '#673AB7', '#512DA8'],
-                            text=[f'{result.prob_agonist:.3f}', f'{result.prob_antagonist:.3f}', f'{result.prob_inactive:.3f}'],
-                            textposition='auto',
-                        )
-                    ])
-                    fig.update_layout(
-                        title="Class Probability Distribution",
-                        xaxis_title="Class",
-                        yaxis_title="Probability",
-                        yaxis_range=[0, 1],
-                        height=400,
-                    )
-                    st.plotly_chart(fig, use_container_width=True)
-                    
-                    # Uncertainty analysis
-                    if result.prob_std_error is not None:
-                        st.markdown("#### Uncertainty Analysis")
-                        err_col1, err_col2, err_col3 = st.columns(3)
-                        with err_col1:
-                            error_pct = result.prob_std_error * 100
-                            st.metric("Standard Error", f"± {error_pct:.2f}%")
-                        with err_col2:
-                            prob_max = max(result.prob_agonist, result.prob_antagonist, result.prob_inactive)
-                            ci_lower = max(0.0, prob_max - 2 * result.prob_std_error)
-                            st.metric("95% CI Lower", f"{ci_lower:.4f}")
-                        with err_col3:
-                            ci_upper = min(1.0, prob_max + 2 * result.prob_std_error)
-                            st.metric("95% CI Upper", f"{ci_upper:.4f}")
-                        st.info(
-                            f"**Prediction Range:** Highest probability = {prob_max:.4f} ± {result.prob_std_error:.4f} "
-                            f"(95% confidence interval: [{ci_lower:.4f}, {ci_upper:.4f}])"
-                        )
                 else:
                     st.session_state.pop("last_single_prediction", None)
                     st.session_state.pop("last_docking_result", None)
@@ -710,6 +717,7 @@ def render_gpcr_prediction_page():
 
         last_pred = st.session_state.get("last_single_prediction")
         if last_pred:
+            _render_single_prediction_from_session(last_pred)
             st.divider()
             st.subheader("Docking + receptor-ligand visualization")
             st.caption(
@@ -729,32 +737,17 @@ def render_gpcr_prediction_page():
             dock_result = st.session_state.get("last_docking_result")
             if dock_result and dock_result.get("receptor_name") == str(last_pred["receptor"]):
                 if dock_result.get("ok"):
-                    st.success("Docking complete.")
-                    c1, c2, c3, c4 = st.columns(4)
-                    with c1:
-                        st.metric("Engine", str(dock_result.get("engine", "unknown")))
-                    with c2:
-                        score = dock_result.get("score_kcal_mol")
-                        st.metric("Top Pose Score (kcal/mol)", f"{float(score):.3f}" if score is not None else "N/A")
-                    with c3:
-                        cx, cy, cz = dock_result.get("center", [0.0, 0.0, 0.0])
-                        st.metric("Grid Center", f"{float(cx):.2f}, {float(cy):.2f}, {float(cz):.2f}")
-                    with c4:
-                        sx, sy, sz = dock_result.get("size", [0.0, 0.0, 0.0])
-                        st.metric("Grid Size (Å)", f"{float(sx):.1f}, {float(sy):.1f}, {float(sz):.1f}")
-
-                    st.caption(
-                        f"Output pose: `{dock_result.get('out_pose_path', '')}` | "
-                        f"Log: `{dock_result.get('log_path', '')}`"
-                    )
-                    st.caption(f"Command: `{dock_result.get('command', '')}`")
-
                     if not py3dmol_available():
                         st.info("Install **py3Dmol** to render the docked complex: `pip install py3Dmol`")
                     elif st_components is None:
                         st.warning("streamlit.components is unavailable; cannot embed the docked 3D viewer.")
                     elif dock_result.get("html"):
                         st_components.html(str(dock_result["html"]), height=560, scrolling=False)
+                        score = dock_result.get("score_kcal_mol")
+                        st.markdown(
+                            f"**Top Pose Docking Score (kcal/mol):** "
+                            f"{float(score):.3f}" if score is not None else "**Top Pose Docking Score (kcal/mol):** N/A"
+                        )
                     else:
                         st.warning("Docking succeeded, but the 3D viewer payload was empty.")
                 else:
