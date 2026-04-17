@@ -612,7 +612,7 @@ def render_gpcr_prediction_page():
             "After prediction, show 3D receptor + your ligand (py3Dmol)",
             value=True,
             key="chk_show_3d_complex",
-            help="Tan receptor cartoon plus your compound (green sticks) in the orthosteric region. "
+            help="Tan receptor trace plus your compound (solid green sticks), flat colors without fog, in the orthosteric region. "
             "Pose is RDKit-generated with centroid aligned to the structure’s binding site; "
             "the co-crystal ligand is not shown. Not a docking score.",
         )
@@ -702,8 +702,8 @@ def render_gpcr_prediction_page():
                     if show_3d_complex and receptor_selected and result.canonical_smiles:
                         st.subheader("3D receptor + ligand")
                         st.caption(
-                            f"Tan cartoon: receptor atoms within **{pocket_radius_a:.0f} Å** of the binding-site center. "
-                            "Green sticks: your compound only. Illustrative geometry, not AutoDock/Vina docking."
+                            f"Tan trace: receptor atoms within **{pocket_radius_a:.0f} Å** of the binding-site center. "
+                            "Solid green sticks: your compound only. Illustrative geometry, not AutoDock/Vina docking."
                         )
                         if not py3dmol_available():
                             st.info("Install **py3Dmol** to enable this panel: `pip install py3Dmol`")

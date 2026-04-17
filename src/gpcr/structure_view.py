@@ -18,8 +18,9 @@ try:
 except ImportError:
     py3Dmol = None
 
-# MBind-aligned palette: tan cartoon receptor, greenCarbon query sticks
+# MBind-aligned palette: tan receptor cartoon, solid green query sticks (flat color, not element scheme)
 RECEPTOR_CARTOON_HEX = "d2b48c"
+QUERY_LIGAND_STICK_HEX = "2e7d32"
 
 # Keep only protein ATOMs in the receptor view (drops co-crystal ligand if mis-tagged as ATOM).
 _STANDARD_PROTEIN_RESN = frozenset(
@@ -212,10 +213,19 @@ def build_gpcr_complex_view_html(
         return None
     try:
         view = py3Dmol.view(width=width, height=height)
+        # Flat look: no outline/AO, no distance fog; trace cartoon reads as a uniform strand vs thick shaded ribbon.
+        view.setViewStyle({"style": "none"})
+        view.enableFog(False)
         view.addModel(receptor_pdb_text, "pdb")
-        view.setStyle({"model": 0}, {"cartoon": {"color": f"0x{RECEPTOR_CARTOON_HEX}"}})
+        view.setStyle(
+            {"model": 0},
+            {"cartoon": {"style": "trace", "color": f"0x{RECEPTOR_CARTOON_HEX}"}},
+        )
         view.addModel(query_ligand_pdb_text, "pdb")
-        view.setStyle({"model": 1}, {"stick": {"radius": 0.13, "colorscheme": "greenCarbon"}})
+        view.setStyle(
+            {"model": 1},
+            {"stick": {"radius": 0.13, "color": f"0x{QUERY_LIGAND_STICK_HEX}"}},
+        )
         view.zoomTo()
         return view._make_html()
     except Exception:
