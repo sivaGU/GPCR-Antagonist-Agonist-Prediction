@@ -21,6 +21,14 @@ except ImportError:
 # MBind-aligned palette: tan cartoon receptor, greenCarbon query sticks
 RECEPTOR_CARTOON_HEX = "d2b48c"
 
+# Keep only protein ATOMs in the receptor view (drops co-crystal ligand if mis-tagged as ATOM).
+_STANDARD_PROTEIN_RESN = frozenset(
+    {
+        "ALA", "ARG", "ASN", "ASP", "CYS", "CYX", "GLN", "GLU", "GLY", "HIS", "HIE", "HID", "HIP",
+        "ILE", "LEU", "LYS", "MET", "MSE", "PHE", "PRO", "SER", "THR", "TRP", "TYR", "VAL",
+    }
+)
+
 
 def _resolve_data_root() -> Path:
     env_root = os.environ.get("GPCR_DATA_ROOT", "").strip()
@@ -38,14 +46,41 @@ def _resolve_data_root() -> Path:
 def resolve_receptor_structure_paths(receptor_folder: str) -> Tuple[Optional[Path], Optional[Path]]:
     """
     Return (receptor_only_pdb, reference_ligand_only_pdb) under Josh_Receptor_Features/<name>/.
+
+    The receptor file is always the one paired with the ligand asset, e.g. 7EXD_ligand_only.pdb
+    -> 7EXD_receptor_only.pdb (never the full complex *.pdb).
     """
     root = _resolve_data_root()
     pocket = root / "Josh_Receptor_Features" / str(receptor_folder).strip()
     if not pocket.is_dir():
         return None, None
-    rec = next(iter(sorted(pocket.glob("*_receptor_only.pdb"))), None)
     ref_lig = next(iter(sorted(pocket.glob("*_ligand_only.pdb"))), None)
+    rec: Optional[Path] = None
+    if ref_lig is not None and ref_lig.name.endswith("_ligand_only.pdb"):
+        stem = ref_lig.name[: -len("_ligand_only.pdb")]
+        candidate = pocket / f"{stem}_receptor_only.pdb"
+        if candidate.is_file():
+            rec = candidate
+    if rec is None:
+        rec = next(iter(sorted(pocket.glob("*_receptor_only.pdb"))), None)
     return rec, ref_lig
+
+
+def _sanitize_receptor_pdb_for_view(pdb_text: str) -> str:
+    """
+    Drop HETATM and any ATOM record that is not a standard protein residue (removes waters,
+    co-crystal ligands, and ions that would otherwise show as extra sticks with the cartoon).
+    """
+    lines_out: list[str] = []
+    for line in pdb_text.splitlines():
+        if line.startswith("HETATM"):
+            continue
+        if line.startswith("ATOM") and len(line) > 20:
+            resn = line[17:20].strip().upper()
+            if resn not in _STANDARD_PROTEIN_RESN:
+                continue
+        lines_out.append(line)
+    return "\n".join(lines_out)
 
 
 def _pdb_heavy_atom_com(pdb_text: str) -> Optional[np.ndarray]:
@@ -156,8 +191,10 @@ def build_aligned_complex_html_for_receptor(
     """
     rec_path, ref_lig_path = resolve_receptor_structure_paths(receptor_folder)
     if rec_path is None or not rec_path.is_file():
-        return None, "No receptor PDB found for this target (expected *_receptor_only.pdb)."
-    rec_text = rec_path.read_text(encoding="utf-8", errors="ignore")
+        return None, "No receptor PDB found for this target (expected <id>_receptor_only.pdb paired with ligand data)."
+    rec_text = _sanitize_receptor_pdb_for_view(
+        rec_path.read_text(encoding="utf-8", errors="ignore")
+    )
     ref_text = ref_lig_path.read_text(encoding="utf-8", errors="ignore") if ref_lig_path and ref_lig_path.is_file() else ""
     target_com = _pdb_heavy_atom_com(ref_text) if ref_text.strip() else _pdb_heavy_atom_com(rec_text)
     if target_com is None:
