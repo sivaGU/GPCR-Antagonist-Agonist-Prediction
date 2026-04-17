@@ -66,11 +66,8 @@ from src.gpcr.predict import (
     load_predictor,
     get_available_receptors,
 )
-from src.gpcr.structure_view import (
-    DEFAULT_BINDING_SITE_VIEW_RADIUS_A,
-    build_aligned_complex_html_for_receptor,
-    py3dmol_available,
-)
+from src.gpcr.structure_view import py3dmol_available
+from src.gpcr.docking import run_single_receptor_docking
 
 try:
     import streamlit.components.v1 as st_components
@@ -621,28 +618,10 @@ def render_gpcr_prediction_page():
         elif ligand_input and ligand_input.strip():
             ligand_to_use = ligand_input.strip()
 
-        show_3d_complex = st.checkbox(
-            "After prediction, show 3D receptor + your ligand (py3Dmol)",
-            value=True,
-            key="chk_show_3d_complex",
-            help="Tan receptor cartoon plus your compound (green sticks) in the orthosteric region. "
-            "Pose is RDKit-generated with centroid aligned to the structure’s binding site; "
-            "the co-crystal ligand is not shown. Not a docking score.",
+        st.caption(
+            "Workflow: run FAP prediction first, then click the docking button below to generate and visualize "
+            "a top docking pose."
         )
-        pocket_radius_a = float(DEFAULT_BINDING_SITE_VIEW_RADIUS_A)
-        if show_3d_complex:
-            pocket_radius_a = float(
-                st.slider(
-                    "3D view: receptor atoms within this radius of the binding site (Å)",
-                    min_value=50,
-                    max_value=100,
-                    value=75,
-                    step=5,
-                    key="pocket_view_radius_A",
-                    help="Only protein atoms within this distance of the orthosteric center are drawn, "
-                    "so the scene stays focused on the binding region (full receptor is used if too few atoms remain).",
-                )
-            )
 
         if st.button("Predict", type="primary", key="btn_single"):
             if receptor_selected and ligand_to_use:
@@ -653,6 +632,17 @@ def render_gpcr_prediction_page():
                 )
                 if result.is_valid:
                     st.success("Valid input")
+                    st.session_state["last_single_prediction"] = {
+                        "receptor": result.receptor,
+                        "canonical_smiles": result.canonical_smiles,
+                        "predicted_class": result.predicted_class,
+                        "class_id": int(result.class_id),
+                        "prob_agonist": float(result.prob_agonist),
+                        "prob_antagonist": float(result.prob_antagonist),
+                        "prob_inactive": float(result.prob_inactive),
+                        "prob_std_error": float(result.prob_std_error) if result.prob_std_error is not None else None,
+                    }
+                    st.session_state.pop("last_docking_result", None)
                     
                     # Main prediction
                     col1, col2, col3 = st.columns(3)
@@ -711,31 +701,64 @@ def render_gpcr_prediction_page():
                             f"**Prediction Range:** Highest probability = {prob_max:.4f} ± {result.prob_std_error:.4f} "
                             f"(95% confidence interval: [{ci_lower:.4f}, {ci_upper:.4f}])"
                         )
-
-                    if show_3d_complex and receptor_selected and result.canonical_smiles:
-                        st.subheader("3D receptor + ligand")
-                        st.caption(
-                            f"Tan cartoon: receptor atoms within **{pocket_radius_a:.0f} Å** of the binding-site center. "
-                            "Green sticks: your compound only. Illustrative geometry, not AutoDock/Vina docking."
-                        )
-                        if not py3dmol_available():
-                            st.info("Install **py3Dmol** to enable this panel: `pip install py3Dmol`")
-                        elif st_components is None:
-                            st.warning("streamlit.components not available; cannot embed the 3D viewer.")
-                        else:
-                            html, vmsg = build_aligned_complex_html_for_receptor(
-                                receptor_selected,
-                                result.canonical_smiles,
-                                binding_site_radius_angstrom=pocket_radius_a,
-                            )
-                            if html:
-                                st_components.html(html, height=540, scrolling=False)
-                            else:
-                                st.warning(vmsg)
                 else:
+                    st.session_state.pop("last_single_prediction", None)
+                    st.session_state.pop("last_docking_result", None)
                     st.error(result.error)
             else:
                 st.warning("Please select a GPCR Class A receptor and provide ligand SMILES or upload a structure file.")
+
+        last_pred = st.session_state.get("last_single_prediction")
+        if last_pred:
+            st.divider()
+            st.subheader("Docking + receptor-ligand visualization")
+            st.caption(
+                "Grid center is set to the centroid of this receptor's `<id>_ligand_only.pdb`; "
+                "grid size is auto-derived per receptor (15-20 Å per axis). "
+                "Docking uses MBind-consistent defaults: exhaustiveness=64, num_modes=10, seed=42."
+            )
+
+            if st.button("Run docking and show top pose", key="btn_single_docking", type="secondary"):
+                with st.spinner("Running docking..."):
+                    dock_res = run_single_receptor_docking(
+                        receptor_folder=str(last_pred["receptor"]),
+                        canonical_smiles=str(last_pred["canonical_smiles"]),
+                    )
+                st.session_state["last_docking_result"] = dock_res.__dict__
+
+            dock_result = st.session_state.get("last_docking_result")
+            if dock_result and dock_result.get("receptor_name") == str(last_pred["receptor"]):
+                if dock_result.get("ok"):
+                    st.success("Docking complete.")
+                    c1, c2, c3, c4 = st.columns(4)
+                    with c1:
+                        st.metric("Engine", str(dock_result.get("engine", "unknown")))
+                    with c2:
+                        score = dock_result.get("score_kcal_mol")
+                        st.metric("Top Pose Score (kcal/mol)", f"{float(score):.3f}" if score is not None else "N/A")
+                    with c3:
+                        cx, cy, cz = dock_result.get("center", [0.0, 0.0, 0.0])
+                        st.metric("Grid Center", f"{float(cx):.2f}, {float(cy):.2f}, {float(cz):.2f}")
+                    with c4:
+                        sx, sy, sz = dock_result.get("size", [0.0, 0.0, 0.0])
+                        st.metric("Grid Size (Å)", f"{float(sx):.1f}, {float(sy):.1f}, {float(sz):.1f}")
+
+                    st.caption(
+                        f"Output pose: `{dock_result.get('out_pose_path', '')}` | "
+                        f"Log: `{dock_result.get('log_path', '')}`"
+                    )
+                    st.caption(f"Command: `{dock_result.get('command', '')}`")
+
+                    if not py3dmol_available():
+                        st.info("Install **py3Dmol** to render the docked complex: `pip install py3Dmol`")
+                    elif st_components is None:
+                        st.warning("streamlit.components is unavailable; cannot embed the docked 3D viewer.")
+                    elif dock_result.get("html"):
+                        st_components.html(str(dock_result["html"]), height=560, scrolling=False)
+                    else:
+                        st.warning("Docking succeeded, but the 3D viewer payload was empty.")
+                else:
+                    st.error(str(dock_result.get("message", "Docking failed.")))
 
     else:
         uploaded_file = st.file_uploader(
