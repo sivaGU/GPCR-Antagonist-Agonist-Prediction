@@ -365,6 +365,73 @@ def _smiles_to_sdf_file(smiles: str, out_path: Path) -> Tuple[bool, str]:
     return True, "ok"
 
 
+def _obabel_convert(in_file: Path, out_file: Path, in_format: str, out_format: str) -> Tuple[bool, str]:
+    """
+    Convert structure file format with Open Babel when available.
+    """
+    obabel = shutil.which("obabel")
+    if not obabel:
+        return False, "Open Babel (`obabel`) is not available in PATH."
+    cmd = [
+        obabel,
+        "-i",
+        in_format,
+        str(in_file),
+        "-o",
+        out_format,
+        "-O",
+        str(out_file),
+    ]
+    # Add hydrogens and Gasteiger charges for docking-friendly PDBQT outputs.
+    if out_format.lower() == "pdbqt":
+        cmd += ["-h", "--partialcharge", "gasteiger"]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+    except Exception as e:
+        return False, f"Open Babel conversion failed to launch: {e}"
+    if proc.returncode != 0:
+        err = (proc.stderr or proc.stdout or "").strip()
+        return False, f"Open Babel conversion failed: {err[:400]}"
+    if not out_file.exists() or out_file.stat().st_size == 0:
+        return False, f"Open Babel conversion produced no output file: {out_file}"
+    return True, "ok"
+
+
+def _prepare_inputs_for_engine(
+    engine: str,
+    receptor_src: Path,
+    ligand_sdf: Path,
+    run_dir: Path,
+) -> Tuple[Optional[Path], Optional[Path], str]:
+    """
+    Prepare receptor/ligand inputs for the selected engine.
+    - smina/gnina can consume receptor PDB and ligand SDF directly.
+    - vina generally expects PDBQT for both receptor and ligand, so convert as needed.
+    """
+    if engine in ("smina", "gnina"):
+        return receptor_src, ligand_sdf, "ok"
+
+    # Vina path: use PDBQT receptor and ligand.
+    receptor_for_docking = receptor_src
+    ligand_for_docking = run_dir / "query_ligand.pdbqt"
+    ok_lig, msg_lig = _obabel_convert(ligand_sdf, ligand_for_docking, "sdf", "pdbqt")
+    if not ok_lig:
+        return None, None, (
+            "Could not prepare ligand PDBQT for Vina from SMILES-derived SDF. "
+            f"{msg_lig}"
+        )
+
+    if receptor_src.suffix.lower() != ".pdbqt":
+        receptor_for_docking = run_dir / f"{receptor_src.stem}.pdbqt"
+        ok_rec, msg_rec = _obabel_convert(receptor_src, receptor_for_docking, "pdb", "pdbqt")
+        if not ok_rec:
+            return None, None, (
+                "Could not prepare receptor PDBQT for Vina from receptor PDB. "
+                f"{msg_rec}"
+            )
+    return receptor_for_docking, ligand_for_docking, "ok"
+
+
 def run_single_receptor_docking(
     receptor_folder: str,
     canonical_smiles: str,
@@ -467,12 +534,34 @@ def run_single_receptor_docking(
             html=None,
         )
 
+    receptor_for_docking, ligand_for_docking, prep_engine_msg = _prepare_inputs_for_engine(
+        engine=engine or "unknown",
+        receptor_src=rec_path,
+        ligand_sdf=ligand_sdf,
+        run_dir=run_dir,
+    )
+    if receptor_for_docking is None or ligand_for_docking is None:
+        return DockingResult(
+            ok=False,
+            message=prep_engine_msg,
+            receptor_name=receptor_folder,
+            canonical_smiles=canonical_smiles,
+            center=center,
+            size=size,
+            score_kcal_mol=None,
+            engine=engine or "unknown",
+            command="",
+            out_pose_path=None,
+            log_path=None,
+            html=None,
+        )
+
     cmd = [
         str(engine_path),
         "-r",
-        str(rec_path),
+        str(receptor_for_docking),
         "-l",
-        str(ligand_sdf),
+        str(ligand_for_docking),
         "--center_x",
         str(center[0]),
         "--center_y",
@@ -554,11 +643,13 @@ def run_single_receptor_docking(
     )
 
     if proc.returncode != 0:
+        err_tail = (proc.stderr or proc.stdout or "").strip()
         return DockingResult(
             ok=False,
             message=(
                 "Docking engine returned a non-zero exit code. "
-                f"See log: {log_path}"
+                f"See log: {log_path}. "
+                f"Engine output: {err_tail[:220]}"
             ),
             receptor_name=receptor_folder,
             canonical_smiles=canonical_smiles,
