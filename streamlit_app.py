@@ -160,10 +160,18 @@ st.set_page_config(
     },
 )
 
-# Inject custom CSS - clean dark hero + card layout
+# Inject custom CSS — solid fills (no gradients on chrome); 3D viewer unchanged
 st.markdown("""
 <style>
-    :root { --bg: #f5f8fc; --card: #ffffff; --ink: #0f172a; --brand: #0891b2; --brand2: #2563eb; }
+    :root {
+        --bg: #f5f8fc;
+        --card: #ffffff;
+        --ink: #0f172a;
+        --brand: #0891b2;
+        --brand2: #2563eb;
+        --sidebar-bg: #111827;
+        --hero-bg: #0f172a;
+    }
     .stApp { background: var(--bg); color: var(--ink); }
     .main .block-container,
     section.main .block-container {
@@ -172,36 +180,41 @@ st.markdown("""
         max-width: 1300px;
     }
     [data-testid="stSidebar"] {
-        background: linear-gradient(180deg, #0f172a 0%, #111827 100%);
+        background: var(--sidebar-bg);
         color: #f8fafc;
         width: 300px !important;
     }
     [data-testid="stSidebar"] p, [data-testid="stSidebar"] li, [data-testid="stSidebar"] h3 { color: #e2e8f0 !important; }
     .stButton > button {
-        background: linear-gradient(90deg, var(--brand), var(--brand2));
+        background: var(--brand2);
         color: #fff;
         border: none;
         border-radius: 10px;
         font-weight: 600;
-        box-shadow: 0 8px 20px rgba(37, 99, 235, 0.2);
+        box-shadow: none;
+    }
+    .stButton > button:hover {
+        background: #1d4ed8;
+        color: #fff;
     }
     .hero {
-        background: radial-gradient(circle at 20% 20%, #1d4ed8 0%, #0f172a 60%);
+        background: var(--hero-bg);
         color: #e2e8f0;
         padding: 1.6rem 1.8rem;
         border-radius: 16px;
         margin-bottom: 1.2rem;
-        box-shadow: 0 10px 24px rgba(2, 6, 23, 0.25);
+        border: 1px solid #1e293b;
+        box-shadow: none;
     }
     .hero h2 { color: #f8fafc; margin-bottom: 0.4rem; }
     .hero p { margin: 0; color: #cbd5e1; }
     .card {
-        background: #ffffff;
+        background: var(--card);
         border: 1px solid #e2e8f0;
         border-radius: 14px;
         padding: 0.8rem 1rem;
         margin-bottom: 0.8rem;
-        box-shadow: 0 3px 10px rgba(15, 23, 42, 0.06);
+        box-shadow: none;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -612,7 +625,7 @@ def render_gpcr_prediction_page():
             "After prediction, show 3D receptor + your ligand (py3Dmol)",
             value=True,
             key="chk_show_3d_complex",
-            help="Tan receptor trace plus your compound (solid green sticks), flat colors without fog, in the orthosteric region. "
+            help="Tan receptor cartoon plus your compound (green sticks) in the orthosteric region. "
             "Pose is RDKit-generated with centroid aligned to the structure’s binding site; "
             "the co-crystal ligand is not shown. Not a docking score.",
         )
@@ -702,8 +715,8 @@ def render_gpcr_prediction_page():
                     if show_3d_complex and receptor_selected and result.canonical_smiles:
                         st.subheader("3D receptor + ligand")
                         st.caption(
-                            f"Tan trace: receptor atoms within **{pocket_radius_a:.0f} Å** of the binding-site center. "
-                            "Solid green sticks: your compound only. Illustrative geometry, not AutoDock/Vina docking."
+                            f"Tan cartoon: receptor atoms within **{pocket_radius_a:.0f} Å** of the binding-site center. "
+                            "Green sticks: your compound only. Illustrative geometry, not AutoDock/Vina docking."
                         )
                         if not py3dmol_available():
                             st.info("Install **py3Dmol** to enable this panel: `pip install py3Dmol`")
