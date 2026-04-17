@@ -49,24 +49,32 @@ def _resolve_data_root() -> Path:
 
 def resolve_receptor_structure_paths(receptor_folder: str) -> Tuple[Optional[Path], Optional[Path]]:
     """
-    Return (receptor_only_pdb, reference_ligand_only_pdb) under Josh_Receptor_Features/<name>/.
+    Return (receptor_only_pdb, ligand_only_pdb) under Josh_Receptor_Features/<folder>/.
 
-    The receptor file is always the one paired with the ligand asset, e.g. 7EXD_ligand_only.pdb
-    -> 7EXD_receptor_only.pdb (never the full complex *.pdb).
+    Pairs by **matching PDB ID stem** so `<id>_ligand_only.pdb` always pairs with
+    `<id>_receptor_only.pdb` (never the full complex *.pdb, never a mismatched ID).
     """
     root = _resolve_data_root()
     pocket = root / "Josh_Receptor_Features" / str(receptor_folder).strip()
     if not pocket.is_dir():
         return None, None
-    ref_lig = next(iter(sorted(pocket.glob("*_ligand_only.pdb"))), None)
-    rec: Optional[Path] = None
-    if ref_lig is not None and ref_lig.name.endswith("_ligand_only.pdb"):
-        stem = ref_lig.name[: -len("_ligand_only.pdb")]
-        candidate = pocket / f"{stem}_receptor_only.pdb"
-        if candidate.is_file():
-            rec = candidate
-    if rec is None:
-        rec = next(iter(sorted(pocket.glob("*_receptor_only.pdb"))), None)
+
+    lig_suffix, rec_suffix = "_ligand_only.pdb", "_receptor_only.pdb"
+    ligand_files = sorted(pocket.glob(f"*{lig_suffix}"))
+    receptor_files = sorted(pocket.glob(f"*{rec_suffix}"))
+    if not ligand_files or not receptor_files:
+        return None, None
+
+    lig_stems = {p.name[: -len(lig_suffix)] for p in ligand_files}
+    rec_stems = {p.name[: -len(rec_suffix)] for p in receptor_files}
+    common = sorted(lig_stems & rec_stems)
+    if not common:
+        return None, None
+    stem = common[0]
+    rec = pocket / f"{stem}{rec_suffix}"
+    ref_lig = pocket / f"{stem}{lig_suffix}"
+    if not rec.is_file() or not ref_lig.is_file():
+        return None, None
     return rec, ref_lig
 
 
@@ -125,18 +133,39 @@ def _clip_receptor_pdb_near_site(
     return "\n".join(parts)
 
 
-def _pdb_heavy_atom_com(pdb_text: str) -> Optional[np.ndarray]:
+def _pdb_line_element_symbol(line: str) -> str:
+    """Element symbol from PDB v3 cols 77–78, with fallbacks from atom name (cols 13–16)."""
+    elem = ""
+    if len(line) >= 78:
+        elem = line[76:78].strip().upper()
+    if elem:
+        return elem
+    if len(line) < 16:
+        return ""
+    name = line[12:16].strip().upper()
+    if not name:
+        return ""
+    two = name[:2]
+    if two in ("BR", "CL", "FE", "ZN", "MG", "CA", "NA", "MN", "CU", "CO", "NI", "SE"):
+        return two
+    if name[0].isdigit() and len(name) > 1 and name[1].isalpha():
+        return name[1:2]
+    return name[0]
+
+
+def _ligand_only_pdb_heavy_atom_centroid(pdb_text: str) -> Optional[np.ndarray]:
+    """
+    Centroid (mean x,y,z) of heavy atoms in a ligand-only PDB (ATOM/HETATM records).
+    Coordinates use standard PDB columns 31–54 (0-based slices 30:54).
+    """
     coords: list[list[float]] = []
     for line in pdb_text.splitlines():
         if not (line.startswith("ATOM") or line.startswith("HETATM")):
             continue
-        if len(line) < 38:
+        if len(line) < 54:
             continue
-        try:
-            elem = line[76:78].strip() or line[12:16].strip()[:1]
-        except Exception:
-            elem = ""
-        if elem.upper() in ("H", "D"):
+        elem = _pdb_line_element_symbol(line)
+        if elem in ("H", "D"):
             continue
         try:
             x = float(line[30:38])
@@ -148,6 +177,11 @@ def _pdb_heavy_atom_com(pdb_text: str) -> Optional[np.ndarray]:
     if not coords:
         return None
     return np.asarray(coords, dtype=np.float64).mean(axis=0)
+
+
+def _pdb_heavy_atom_com(pdb_text: str) -> Optional[np.ndarray]:
+    """Heavy-atom centroid for mixed PDB text (e.g. legacy callers)."""
+    return _ligand_only_pdb_heavy_atom_centroid(pdb_text)
 
 
 def smiles_to_pdb_block_aligned(
@@ -230,7 +264,7 @@ def build_aligned_complex_html_for_receptor(
     binding_site_radius_angstrom: float = DEFAULT_BINDING_SITE_VIEW_RADIUS_A,
 ) -> Tuple[Optional[str], str]:
     """
-    Load PDB assets for receptor_folder, align query ligand to reference ligand COM, return (html, status_message).
+    Load PDB assets for receptor_folder, align query ligand to the ligand-only PDB centroid, return (html, status_message).
 
     binding_site_radius_angstrom: receptor cartoon is clipped to protein atoms within this distance (Å)
     of the orthosteric site center so the view stays localized (typical UI range 50–100 Å).
@@ -238,13 +272,17 @@ def build_aligned_complex_html_for_receptor(
     rec_path, ref_lig_path = resolve_receptor_structure_paths(receptor_folder)
     if rec_path is None or not rec_path.is_file():
         return None, "No receptor PDB found for this target (expected <id>_receptor_only.pdb paired with ligand data)."
+    if ref_lig_path is None or not ref_lig_path.is_file():
+        return None, "No ligand-only PDB found for this target (expected <id>_ligand_only.pdb matching the receptor PDB id)."
+    ref_text = ref_lig_path.read_text(encoding="utf-8", errors="ignore")
+    if not ref_text.strip():
+        return None, "Ligand-only PDB is empty; cannot place the query ligand."
+    target_com = _ligand_only_pdb_heavy_atom_centroid(ref_text)
+    if target_com is None:
+        return None, "Could not compute a centroid from the ligand-only PDB (no parseable heavy-atom coordinates)."
     rec_text = _sanitize_receptor_pdb_for_view(
         rec_path.read_text(encoding="utf-8", errors="ignore")
     )
-    ref_text = ref_lig_path.read_text(encoding="utf-8", errors="ignore") if ref_lig_path and ref_lig_path.is_file() else ""
-    target_com = _pdb_heavy_atom_com(ref_text) if ref_text.strip() else _pdb_heavy_atom_com(rec_text)
-    if target_com is None:
-        return None, "Could not derive a binding-site center from the reference structures."
     query_pdb = smiles_to_pdb_block_aligned(canonical_smiles, target_com)
     if not query_pdb:
         return None, "RDKit could not build a 3D conformer for this SMILES."
