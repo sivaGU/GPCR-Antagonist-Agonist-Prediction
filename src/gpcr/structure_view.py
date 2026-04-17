@@ -29,6 +29,10 @@ _STANDARD_PROTEIN_RESN = frozenset(
     }
 )
 
+# Default clip: keep receptor atoms within this distance (Å) of the binding-site center.
+DEFAULT_BINDING_SITE_VIEW_RADIUS_A = 75.0
+MIN_ATOM_LINES_AFTER_CLIP = 80  # fall back to full receptor if clip removes too much
+
 
 def _resolve_data_root() -> Path:
     env_root = os.environ.get("GPCR_DATA_ROOT", "").strip()
@@ -81,6 +85,44 @@ def _sanitize_receptor_pdb_for_view(pdb_text: str) -> str:
                 continue
         lines_out.append(line)
     return "\n".join(lines_out)
+
+
+def _clip_receptor_pdb_near_site(
+    sanitized_pdb_text: str,
+    site_center: np.ndarray,
+    radius_angstrom: float,
+) -> str:
+    """
+    Keep only ATOM records within radius_angstrom (Å) of site_center (binding site / query ligand centroid).
+    Preserves CRYST1 if present; appends END.
+    """
+    r = float(radius_angstrom)
+    if r <= 0:
+        return sanitized_pdb_text
+    center = np.asarray(site_center, dtype=np.float64).reshape(3)
+    header_lines: list[str] = []
+    atom_lines: list[str] = []
+    for line in sanitized_pdb_text.splitlines():
+        if line.startswith("CRYST1"):
+            header_lines.append(line)
+            continue
+        if not line.startswith("ATOM"):
+            continue
+        if len(line) < 54:
+            continue
+        try:
+            x = float(line[30:38])
+            y = float(line[38:46])
+            z = float(line[46:54])
+        except ValueError:
+            continue
+        pos = np.array([x, y, z], dtype=np.float64)
+        if float(np.linalg.norm(pos - center)) <= r:
+            atom_lines.append(line)
+    if len(atom_lines) < MIN_ATOM_LINES_AFTER_CLIP:
+        return sanitized_pdb_text
+    parts = header_lines + atom_lines + ["END"]
+    return "\n".join(parts)
 
 
 def _pdb_heavy_atom_com(pdb_text: str) -> Optional[np.ndarray]:
@@ -185,9 +227,13 @@ def build_aligned_complex_html_for_receptor(
     canonical_smiles: str,
     width: int = 720,
     height: int = 520,
+    binding_site_radius_angstrom: float = DEFAULT_BINDING_SITE_VIEW_RADIUS_A,
 ) -> Tuple[Optional[str], str]:
     """
     Load PDB assets for receptor_folder, align query ligand to reference ligand COM, return (html, status_message).
+
+    binding_site_radius_angstrom: receptor cartoon is clipped to protein atoms within this distance (Å)
+    of the orthosteric site center so the view stays localized (typical UI range 50–100 Å).
     """
     rec_path, ref_lig_path = resolve_receptor_structure_paths(receptor_folder)
     if rec_path is None or not rec_path.is_file():
@@ -202,8 +248,11 @@ def build_aligned_complex_html_for_receptor(
     query_pdb = smiles_to_pdb_block_aligned(canonical_smiles, target_com)
     if not query_pdb:
         return None, "RDKit could not build a 3D conformer for this SMILES."
+    radius = float(binding_site_radius_angstrom)
+    radius = max(50.0, min(100.0, radius))
+    rec_for_view = _clip_receptor_pdb_near_site(rec_text, target_com, radius)
     # Reference ligand PDB is used only for binding-site centroid; not rendered in the viewer.
-    html = build_gpcr_complex_view_html(rec_text, query_pdb, width=width, height=height)
+    html = build_gpcr_complex_view_html(rec_for_view, query_pdb, width=width, height=height)
     if html is None:
         if py3Dmol is None:
             return None, "Install py3Dmol for the 3D viewer: pip install py3Dmol"

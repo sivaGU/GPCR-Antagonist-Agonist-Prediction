@@ -67,6 +67,7 @@ from src.gpcr.predict import (
     get_available_receptors,
 )
 from src.gpcr.structure_view import (
+    DEFAULT_BINDING_SITE_VIEW_RADIUS_A,
     build_aligned_complex_html_for_receptor,
     py3dmol_available,
 )
@@ -615,6 +616,20 @@ def render_gpcr_prediction_page():
             "Pose is RDKit-generated with centroid aligned to the structure’s binding site; "
             "the co-crystal ligand is not shown. Not a docking score.",
         )
+        pocket_radius_a = float(DEFAULT_BINDING_SITE_VIEW_RADIUS_A)
+        if show_3d_complex:
+            pocket_radius_a = float(
+                st.slider(
+                    "3D view: receptor atoms within this radius of the binding site (Å)",
+                    min_value=50,
+                    max_value=100,
+                    value=75,
+                    step=5,
+                    key="pocket_view_radius_A",
+                    help="Only protein atoms within this distance of the orthosteric center are drawn, "
+                    "so the scene stays focused on the binding region (full receptor is used if too few atoms remain).",
+                )
+            )
 
         if st.button("Predict", type="primary", key="btn_single"):
             if receptor_selected and ligand_to_use:
@@ -687,9 +702,8 @@ def render_gpcr_prediction_page():
                     if show_3d_complex and receptor_selected and result.canonical_smiles:
                         st.subheader("3D receptor + ligand")
                         st.caption(
-                            "Tan cartoon: receptor (PDB). Green sticks: your input compound only (co-crystal ligand "
-                            "is not displayed). Centroid placement uses the orthosteric site from the structure; "
-                            "illustrative geometry, not AutoDock/Vina docking."
+                            f"Tan cartoon: receptor atoms within **{pocket_radius_a:.0f} Å** of the binding-site center. "
+                            "Green sticks: your compound only. Illustrative geometry, not AutoDock/Vina docking."
                         )
                         if not py3dmol_available():
                             st.info("Install **py3Dmol** to enable this panel: `pip install py3Dmol`")
@@ -699,6 +713,7 @@ def render_gpcr_prediction_page():
                             html, vmsg = build_aligned_complex_html_for_receptor(
                                 receptor_selected,
                                 result.canonical_smiles,
+                                binding_site_radius_angstrom=pocket_radius_a,
                             )
                             if html:
                                 st_components.html(html, height=540, scrolling=False)
