@@ -1,6 +1,6 @@
 # GPCR-FAP GUI
 
-GPCR-FAP is a Streamlit-based GUI for **Class A GPCR** receptor–ligand **multiclass** functional activity prediction (Agonist / Antagonist / Inactive). It combines manuscript-aligned ligand and receptor pocket features with optional **3D structure viewing** (py3Dmol, MBind-style receptor cartoon + query ligand).
+GPCR-FAP is a Streamlit GUI for **Class A GPCR** receptor-ligand **multiclass** functional activity prediction (Agonist / Antagonist / Inactive), with optional **SMINA pose generation** and 3D receptor-ligand visualization.
 
 Repository: https://github.com/sivaGU/GPCR-FAP
 
@@ -9,7 +9,8 @@ Repository: https://github.com/sivaGU/GPCR-FAP
 - **Functional activity inference** from SMILES (or common structure files) for each bundled receptor target.
 - **Models:** Random Forest, LightGBM, XGBoost, and ensemble artifacts under `artifacts/demo_*` (multiclass `predict_proba`, **2103** features per row).
 - **Receptor assets:** `Josh_Receptor_Features/` — pocket CSVs, conservation summaries, and PDBs per target (~70 folders).
-- **3D view:** Receptor cartoon (tan) plus **your** compound in the orthosteric region (RDKit 3D conformer, centroid aligned using the co-crystal site center only). **Native/co-crystal ligands are not drawn** in the viewer. This is **not** AutoDock/Vina docking.
+- **Post-prediction pose generation:** SMINA top-pose generation from the predicted ligand (SMILES input supported), using receptor-specific grid centers from each `*_ligand_only.pdb`.
+- **3D docked complex view:** Receptor cartoon (tan) plus docked ligand pose in sticks (py3Dmol).
 
 ## Quick Start
 
@@ -17,7 +18,8 @@ Repository: https://github.com/sivaGU/GPCR-FAP
 2. Create a virtual environment and install dependencies (see **Run Locally**).
 3. Launch Streamlit and open the prediction page.
 4. Choose a model, select a receptor, enter SMILES or upload a structure file, and run **Predict**.
-5. Review class probabilities and optional 3D receptor + ligand view.
+5. Review class probabilities.
+6. Optionally click docking to generate and view a SMINA top pose.
 
 ## Run Locally
 
@@ -40,6 +42,7 @@ Repository: https://github.com/sivaGU/GPCR-FAP
 - Python **3.10+** recommended (3.10–3.12 tested).
 - Dependencies in `requirements.txt` (RDKit, scikit-learn, LightGBM, XGBoost, Streamlit, py3Dmol, etc.).
 - **Trained models:** `artifacts/demo_rf/`, `demo_lightgbm/`, `demo_xgboost/`, `demo_ensemble/` must contain `model_seed*.pkl` or `.joblib` plus `feature_config.json` (and optional `threshold.json`).
+- **Docking engine:** SMINA binary available in `docking_assets/` or system `PATH`.
 
 ## Supported Inputs
 
@@ -70,16 +73,20 @@ GPCR-FAP/
 │   └── gpcr/
 │       ├── predict.py
 │       ├── structure_view.py
-│       └── cli.py
+│       └── docking.py
 ├── artifacts/
 │   ├── demo_rf/
 │   ├── demo_lightgbm/
 │   ├── demo_xgboost/
 │   └── demo_ensemble/
+├── docking_assets/
+│   ├── smina / smina.exe
+│   └── receptor_grid_boxes.json
+├── docking_results/                   # generated at runtime
 └── Josh_Receptor_Features/
     └── <receptor_name>/
         ├── *_receptor_only.pdb
-        ├── *_ligand_only.pdb          # used for site centering only (not shown in 3D)
+        ├── *_ligand_only.pdb
         ├── *_pocket_residues_with_conservation.csv
         └── ...
 ```
@@ -90,8 +97,8 @@ GPCR-FAP/
 
 ## Notes on Validation Scope
 
-- Outputs are **multiclass functional activity** predictions (agonist / antagonist / inactive), not binding free energies or crystallographic poses.
-- The **3D panel** places your ligand near the orthosteric site for visualization only; it does not replace AutoDock/Vina or other scored docking pipelines.
+- Outputs include **multiclass functional activity** predictions (agonist / antagonist / inactive).
+- Docking output is a **SMINA-generated top pose** intended for screening visualization and ranking, not a substitute for full physics-based validation.
 
 ## Citation
 

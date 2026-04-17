@@ -715,7 +715,7 @@ def render_gpcr_prediction_page():
             st.caption(
                 "Grid center is set to the centroid of this receptor's `<id>_ligand_only.pdb`; "
                 "grid size is auto-derived per receptor (15-20 Å per axis). "
-                "Docking uses MBind-consistent defaults: exhaustiveness=64, num_modes=10, seed=42."
+                "Pose generation uses SMINA with defaults: exhaustiveness=64, num_modes=10, seed=42."
             )
 
             if st.button("Run docking and show top pose", key="btn_single_docking", type="secondary"):

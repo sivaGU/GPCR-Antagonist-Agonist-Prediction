@@ -67,27 +67,27 @@ def _mbind_source_files_dir(project_root: Path) -> Path:
 
 def ensure_docking_files_folder(project_root: Optional[Path] = None) -> Tuple[Path, str]:
     """
-    Ensure a local docking-files folder exists inside this GUI project.
-    Copies/syncs assets from sibling MBind-main/Files_for_GUI when available.
+    Ensure a local docking assets folder exists inside this GUI project.
+    Syncs SMINA binaries from sibling MBind-main/Files_for_GUI when available.
     """
     root = project_root or _resolve_project_root()
-    dst = root / "Docking_Files"
+    dst = root / "docking_assets"
     src = _mbind_source_files_dir(root)
     dst.mkdir(parents=True, exist_ok=True)
     if not src.is_dir():
         _write_receptor_grid_manifest(root, dst)
         _ensure_local_binaries_executable(dst)
         return dst, (
-            f"Docking_Files created at {dst}, but source folder was not found at {src}. "
-            "Place MBind-main beside this project to sync AD4 helper files automatically."
+            f"docking_assets created at {dst}, but source folder was not found at {src}. "
+            "Place MBind-main beside this project to sync SMINA binaries automatically."
         )
     copied = 0
-    for path in src.rglob("*"):
-        if path.is_dir():
+    # Keep synced assets minimal and purpose-specific for SMINA pose generation.
+    for name in ("smina", "smina.exe"):
+        path = src / name
+        if not path.is_file():
             continue
-        rel = path.relative_to(src)
-        out = dst / rel
-        out.parent.mkdir(parents=True, exist_ok=True)
+        out = dst / name
         try:
             src_size = path.stat().st_size
             needs_copy = (not out.exists()) or (out.stat().st_size != src_size)
@@ -98,7 +98,7 @@ def ensure_docking_files_folder(project_root: Optional[Path] = None) -> Tuple[Pa
             copied += 1
     _write_receptor_grid_manifest(root, dst)
     _ensure_local_binaries_executable(dst)
-    return dst, f"Docking_Files synced from MBind source ({copied} updated file(s))."
+    return dst, f"docking_assets synced from MBind source ({copied} updated file(s))."
 
 
 def _write_receptor_grid_manifest(project_root: Path, docking_files_dir: Path) -> None:
@@ -227,29 +227,23 @@ def compute_receptor_grid_params(receptor_folder: str) -> Tuple[Optional[Tuple[f
 
 
 def _select_docking_engine(files_dir: Path) -> Tuple[Optional[str], Optional[Path]]:
+    """
+    Pose generation is SMINA-only by design.
+    Prefer local docking_assets binary, then PATH.
+    """
     is_windows = os.name == "nt"
-    local_candidates = [
-        "smina.exe" if is_windows else "smina",
-        "gnina.exe" if is_windows else "gnina",
-        "vina.exe" if is_windows else "vina",
-    ]
-    for name in local_candidates:
-        p = files_dir / name
-        if p.is_file():
-            if _is_executable_on_platform(p) or _try_make_executable(p):
-                return name.split(".")[0].lower(), p
+    local_name = "smina.exe" if is_windows else "smina"
+    p = files_dir / local_name
+    if p.is_file() and (_is_executable_on_platform(p) or _try_make_executable(p)):
+        return "smina", p
 
-    # PATH fallback
-    path_candidates = ["smina", "gnina", "vina"]
-    for cmd in path_candidates:
-        found = shutil.which(cmd)
-        if found:
-            return cmd, Path(found)
-        # Windows convenience fallback when PATH entry is `vina.exe`.
-        if is_windows and cmd == "vina":
-            found_exe = shutil.which("vina.exe")
-            if found_exe:
-                return "vina", Path(found_exe)
+    found = shutil.which("smina")
+    if found:
+        return "smina", Path(found)
+    if is_windows:
+        found_exe = shutil.which("smina.exe")
+        if found_exe:
+            return "smina", Path(found_exe)
     return None, None
 
 
@@ -365,73 +359,6 @@ def _smiles_to_sdf_file(smiles: str, out_path: Path) -> Tuple[bool, str]:
     return True, "ok"
 
 
-def _obabel_convert(in_file: Path, out_file: Path, in_format: str, out_format: str) -> Tuple[bool, str]:
-    """
-    Convert structure file format with Open Babel when available.
-    """
-    obabel = shutil.which("obabel")
-    if not obabel:
-        return False, "Open Babel (`obabel`) is not available in PATH."
-    cmd = [
-        obabel,
-        "-i",
-        in_format,
-        str(in_file),
-        "-o",
-        out_format,
-        "-O",
-        str(out_file),
-    ]
-    # Add hydrogens and Gasteiger charges for docking-friendly PDBQT outputs.
-    if out_format.lower() == "pdbqt":
-        cmd += ["-h", "--partialcharge", "gasteiger"]
-    try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
-    except Exception as e:
-        return False, f"Open Babel conversion failed to launch: {e}"
-    if proc.returncode != 0:
-        err = (proc.stderr or proc.stdout or "").strip()
-        return False, f"Open Babel conversion failed: {err[:400]}"
-    if not out_file.exists() or out_file.stat().st_size == 0:
-        return False, f"Open Babel conversion produced no output file: {out_file}"
-    return True, "ok"
-
-
-def _prepare_inputs_for_engine(
-    engine: str,
-    receptor_src: Path,
-    ligand_sdf: Path,
-    run_dir: Path,
-) -> Tuple[Optional[Path], Optional[Path], str]:
-    """
-    Prepare receptor/ligand inputs for the selected engine.
-    - smina/gnina can consume receptor PDB and ligand SDF directly.
-    - vina generally expects PDBQT for both receptor and ligand, so convert as needed.
-    """
-    if engine in ("smina", "gnina"):
-        return receptor_src, ligand_sdf, "ok"
-
-    # Vina path: use PDBQT receptor and ligand.
-    receptor_for_docking = receptor_src
-    ligand_for_docking = run_dir / "query_ligand.pdbqt"
-    ok_lig, msg_lig = _obabel_convert(ligand_sdf, ligand_for_docking, "sdf", "pdbqt")
-    if not ok_lig:
-        return None, None, (
-            "Could not prepare ligand PDBQT for Vina from SMILES-derived SDF. "
-            f"{msg_lig}"
-        )
-
-    if receptor_src.suffix.lower() != ".pdbqt":
-        receptor_for_docking = run_dir / f"{receptor_src.stem}.pdbqt"
-        ok_rec, msg_rec = _obabel_convert(receptor_src, receptor_for_docking, "pdb", "pdbqt")
-        if not ok_rec:
-            return None, None, (
-                "Could not prepare receptor PDBQT for Vina from receptor PDB. "
-                f"{msg_rec}"
-            )
-    return receptor_for_docking, ligand_for_docking, "ok"
-
-
 def run_single_receptor_docking(
     receptor_folder: str,
     canonical_smiles: str,
@@ -445,8 +372,8 @@ def run_single_receptor_docking(
         return DockingResult(
             ok=False,
             message=(
-                f"{sync_msg} No docking engine found. Add `smina`/`gnina`/`vina` binary to `{files_dir}` "
-                "or install one in PATH. On Linux, ensure the file has execute permission (`chmod +x`)."
+                f"{sync_msg} No SMINA binary found. Add `smina` to `{files_dir}` "
+                "or install it in PATH. On Linux, ensure the file has execute permission (`chmod +x`)."
             ),
             receptor_name=receptor_folder,
             canonical_smiles=canonical_smiles,
@@ -510,7 +437,7 @@ def run_single_receptor_docking(
         )
     center, size = _grid_from_ligand_coords(lig_coords)
 
-    runs_dir = project_root / "docking_runs"
+    runs_dir = project_root / "docking_results"
     run_dir = runs_dir / f"{receptor_folder}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     run_dir.mkdir(parents=True, exist_ok=True)
     ligand_sdf = run_dir / "query_ligand.sdf"
@@ -534,34 +461,12 @@ def run_single_receptor_docking(
             html=None,
         )
 
-    receptor_for_docking, ligand_for_docking, prep_engine_msg = _prepare_inputs_for_engine(
-        engine=engine or "unknown",
-        receptor_src=rec_path,
-        ligand_sdf=ligand_sdf,
-        run_dir=run_dir,
-    )
-    if receptor_for_docking is None or ligand_for_docking is None:
-        return DockingResult(
-            ok=False,
-            message=prep_engine_msg,
-            receptor_name=receptor_folder,
-            canonical_smiles=canonical_smiles,
-            center=center,
-            size=size,
-            score_kcal_mol=None,
-            engine=engine or "unknown",
-            command="",
-            out_pose_path=None,
-            log_path=None,
-            html=None,
-        )
-
     cmd = [
         str(engine_path),
         "-r",
-        str(receptor_for_docking),
+        str(rec_path),
         "-l",
-        str(ligand_for_docking),
+        str(ligand_sdf),
         "--center_x",
         str(center[0]),
         "--center_y",
@@ -580,12 +485,11 @@ def run_single_receptor_docking(
         str(int(base_exhaustiveness)),
         "--seed",
         str(DEFAULT_SEED),
+        "--scoring",
+        "vina",
         "-o",
         str(docked_out),
     ]
-
-    if engine == "gnina":
-        cmd += ["--scoring", "vina"]
 
     try:
         proc = subprocess.run(
