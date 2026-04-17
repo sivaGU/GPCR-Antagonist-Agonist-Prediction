@@ -14,7 +14,47 @@ PROJECT_ROOT = Path(__file__).resolve().parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-HANDOFF_DIR = PROJECT_ROOT
+def _artifact_tree_has_models(artifacts_dir: Path) -> bool:
+    if not artifacts_dir.is_dir():
+        return False
+    for sub in artifacts_dir.glob("demo_*"):
+        if sub.is_dir():
+            if list(sub.glob("model_seed*.pkl")) or list(sub.glob("model_seed*.joblib")):
+                return True
+            if list(sub.glob("*.pkl")) or list(sub.glob("*.joblib")):
+                return True
+    if list(artifacts_dir.glob("model_seed*.pkl")) or list(artifacts_dir.glob("model_seed*.joblib")):
+        return True
+    return bool(list(artifacts_dir.glob("*.pkl")) or list(artifacts_dir.glob("*.joblib")))
+
+
+def _resolve_handoff_dir() -> Path:
+    """Prefer project-local artifacts; if they have no models, use sibling ../artifacts (same parent as this repo)."""
+    local_art = PROJECT_ROOT / "artifacts"
+    if _artifact_tree_has_models(local_art):
+        return PROJECT_ROOT
+    parent_art = PROJECT_ROOT.parent / "artifacts"
+    if _artifact_tree_has_models(parent_art):
+        return PROJECT_ROOT.parent
+    return PROJECT_ROOT
+
+
+HANDOFF_DIR = _resolve_handoff_dir()
+
+
+def _ensure_default_gpcr_data_root() -> None:
+    """Use bundled ./Josh_Receptor_Features when present; else sibling GUI_Folder."""
+    if os.environ.get("GPCR_DATA_ROOT", "").strip():
+        return
+    if (PROJECT_ROOT / "Josh_Receptor_Features").is_dir():
+        os.environ["GPCR_DATA_ROOT"] = str(PROJECT_ROOT.resolve())
+        return
+    gui = PROJECT_ROOT.parent / "GUI_Folder"
+    if (gui / "Josh_Receptor_Features").is_dir():
+        os.environ["GPCR_DATA_ROOT"] = str(gui.resolve())
+
+
+_ensure_default_gpcr_data_root()
 
 import io
 import urllib.request
@@ -30,6 +70,15 @@ from src.gpcr.predict import (
     load_predictor,
     get_available_receptors,
 )
+from src.gpcr.structure_view import (
+    build_aligned_complex_html_for_receptor,
+    py3dmol_available,
+)
+
+try:
+    import streamlit.components.v1 as st_components
+except ImportError:
+    st_components = None
 
 # Data paths for demo tool
 DATA_DIR = PROJECT_ROOT / "data"
@@ -284,7 +333,10 @@ def render_home_page():
         - **Status:** Ready for ML artifact upload
         """
     )
-    st.sidebar.success("Upload your trained models to get started!")
+    st.sidebar.info(
+        "Receptor features default to **GUI_Folder/Josh_Receptor_Features** when that folder sits next to this app. "
+        "Add **model_seed*.pkl** under **artifacts/demo_**_* to enable predictions."
+    )
 
     st.markdown(
         """
@@ -364,7 +416,7 @@ def render_documentation_page():
         ## Local setup
         1. Create and activate a virtual environment (conda, venv, or poetry).
         2. Install dependencies: `pip install -r requirements.txt`.
-        3. Ensure `GPCRtryagain - Delete - Copy` is available (or set `GPCR_DATA_ROOT`).
+        3. Receptor data: keep **GUI_Folder** beside **GPCR-FAP-main** (auto-detects **Josh_Receptor_Features**), or set **`GPCR_DATA_ROOT`**.
         4. **Add your trained ML models** to the `artifacts/` folder (see below).
         5. Launch the app: `streamlit run streamlit_app.py`.
         6. Streamlit will open at `http://localhost:8501`. Use the sidebar to switch between pages.
@@ -599,7 +651,11 @@ def render_gpcr_prediction_page():
     if input_mode == "Single receptor-ligand pair":
         receptors = _load_receptor_list()
         if not receptors:
-            st.warning("GPCR Class A receptor list not found (data/gpcr_class_a_receptors.txt). Add it to enable receptor selection.")
+            st.warning(
+                "No receptors found under **Josh_Receptor_Features**. "
+                "Set **GPCR_DATA_ROOT** to the folder that contains **Josh_Receptor_Features**, "
+                "or place **GUI_Folder** next to this project (see README)."
+            )
         receptor_options = ["Select receptor..."] + (receptors if receptors else [])
         receptor_input = st.selectbox(
             "GPCR Class A Receptor",
@@ -641,7 +697,16 @@ def render_gpcr_prediction_page():
             ligand_to_use = ligand_input.strip()
             st.session_state.structure_file_content = None
             st.session_state.structure_file_ext = None
-        
+
+        show_3d_complex = st.checkbox(
+            "After prediction, show 3D receptor + ligand (MBind-style py3Dmol viewer)",
+            value=True,
+            key="chk_show_3d_complex",
+            help="Receptor cartoon (tan) + co-crystal ligand (grey) + your compound (green), "
+            "with your ligand centroid aligned to the orthosteric reference ligand. "
+            "Illustrative geometry only — not a docking score.",
+        )
+
         if st.button("Predict", type="primary", key="btn_single"):
             if receptor_selected and ligand_to_use:
                 result = predict_single(
@@ -733,6 +798,27 @@ def render_gpcr_prediction_page():
                             "Could not retrieve or draw structure for this molecule."
                             + (f" (SMILES: {result.canonical_smiles})" if result.canonical_smiles else "")
                         )
+
+                    if show_3d_complex and receptor_selected and result.canonical_smiles:
+                        st.subheader("3D receptor + ligand")
+                        st.caption(
+                            "Tan cartoon: receptor (PDB). Grey sticks: co-crystal reference ligand in the structure. "
+                            "Green sticks: your input compound, centroid-aligned to the reference ligand (same visual "
+                            "language as MBind; not an AutoDock/Vina pose)."
+                        )
+                        if not py3dmol_available():
+                            st.info("Install **py3Dmol** to enable this panel: `pip install py3Dmol`")
+                        elif st_components is None:
+                            st.warning("streamlit.components not available; cannot embed the 3D viewer.")
+                        else:
+                            html, vmsg = build_aligned_complex_html_for_receptor(
+                                receptor_selected,
+                                result.canonical_smiles,
+                            )
+                            if html:
+                                st_components.html(html, height=540, scrolling=False)
+                            else:
+                                st.warning(vmsg)
                 else:
                     st.error(result.error)
             else:
