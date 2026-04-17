@@ -161,13 +161,13 @@ st.set_page_config(
 st.markdown("""
 <style>
     :root {
-        --bg: #f5f8fc;
+        --bg: #eef6ff;
         --card: #ffffff;
         --ink: #0f172a;
         --brand: #38bdf8;
         --brand2: #60a5fa;
-        --sidebar-bg: #111827;
-        --hero-bg: #0f172a;
+        --sidebar-bg: #cfe4f7;
+        --hero-bg: #dbeafe;
     }
     .stApp { background: var(--bg); color: var(--ink); }
     .main .block-container,
@@ -178,10 +178,10 @@ st.markdown("""
     }
     [data-testid="stSidebar"] {
         background: var(--sidebar-bg);
-        color: #f8fafc;
+        color: #0f3554;
         width: 300px !important;
     }
-    [data-testid="stSidebar"] p, [data-testid="stSidebar"] li, [data-testid="stSidebar"] h3 { color: #e2e8f0 !important; }
+    [data-testid="stSidebar"] p, [data-testid="stSidebar"] li, [data-testid="stSidebar"] h3 { color: #0f3554 !important; }
     .stButton > button {
         background: var(--brand2);
         color: #fff;
@@ -196,15 +196,15 @@ st.markdown("""
     }
     .hero {
         background: var(--hero-bg);
-        color: #e2e8f0;
+        color: #0f3554;
         padding: 1.6rem 1.8rem;
         border-radius: 16px;
         margin-bottom: 1.2rem;
-        border: 1px solid #1e293b;
+        border: 1px solid #bfdbfe;
         box-shadow: none;
     }
-    .hero h2 { color: #f8fafc; margin-bottom: 0.4rem; }
-    .hero p { margin: 0; color: #cbd5e1; }
+    .hero h2 { color: #0b2a44; margin-bottom: 0.4rem; }
+    .hero p { margin: 0; color: #1e3a5f; }
     .card {
         background: var(--card);
         border: 1px solid #e2e8f0;
