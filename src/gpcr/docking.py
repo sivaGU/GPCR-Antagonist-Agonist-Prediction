@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 import re
 import json
+import stat
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -75,6 +76,7 @@ def ensure_docking_files_folder(project_root: Optional[Path] = None) -> Tuple[Pa
     dst.mkdir(parents=True, exist_ok=True)
     if not src.is_dir():
         _write_receptor_grid_manifest(root, dst)
+        _ensure_local_binaries_executable(dst)
         return dst, (
             f"Docking_Files created at {dst}, but source folder was not found at {src}. "
             "Place MBind-main beside this project to sync AD4 helper files automatically."
@@ -95,6 +97,7 @@ def ensure_docking_files_folder(project_root: Optional[Path] = None) -> Tuple[Pa
             shutil.copy2(path, out)
             copied += 1
     _write_receptor_grid_manifest(root, dst)
+    _ensure_local_binaries_executable(dst)
     return dst, f"Docking_Files synced from MBind source ({copied} updated file(s))."
 
 
@@ -123,6 +126,37 @@ def _write_receptor_grid_manifest(project_root: Path, docking_files_dir: Path) -
         }
     out = docking_files_dir / "receptor_grid_boxes.json"
     out.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+
+
+def _is_executable_on_platform(path: Path) -> bool:
+    if not path.is_file():
+        return False
+    if os.name == "nt":
+        return path.suffix.lower() == ".exe"
+    return os.access(path, os.X_OK)
+
+
+def _try_make_executable(path: Path) -> bool:
+    if not path.is_file() or os.name == "nt":
+        return _is_executable_on_platform(path)
+    try:
+        mode = path.stat().st_mode
+        os.chmod(path, mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    except OSError:
+        return False
+    return os.access(path, os.X_OK)
+
+
+def _ensure_local_binaries_executable(files_dir: Path) -> None:
+    """
+    Linux deployments often copy binaries without +x bit. Set execute bits proactively.
+    """
+    if os.name == "nt":
+        return
+    for name in ("vina", "smina", "gnina", "autogrid4", "autodock4"):
+        p = files_dir / name
+        if p.is_file():
+            _try_make_executable(p)
 
 
 def _pdb_line_element_symbol(line: str) -> str:
@@ -202,7 +236,8 @@ def _select_docking_engine(files_dir: Path) -> Tuple[Optional[str], Optional[Pat
     for name in local_candidates:
         p = files_dir / name
         if p.is_file():
-            return name.split(".")[0].lower(), p
+            if _is_executable_on_platform(p) or _try_make_executable(p):
+                return name.split(".")[0].lower(), p
 
     # PATH fallback
     path_candidates = ["smina", "gnina", "vina"]
@@ -344,7 +379,7 @@ def run_single_receptor_docking(
             ok=False,
             message=(
                 f"{sync_msg} No docking engine found. Add `smina`/`gnina`/`vina` binary to `{files_dir}` "
-                "or install one in PATH."
+                "or install one in PATH. On Linux, ensure the file has execute permission (`chmod +x`)."
             ),
             receptor_name=receptor_folder,
             canonical_smiles=canonical_smiles,
