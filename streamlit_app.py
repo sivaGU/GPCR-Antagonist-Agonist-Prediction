@@ -164,8 +164,8 @@ st.markdown("""
         --bg: #f5f8fc;
         --card: #ffffff;
         --ink: #0f172a;
-        --brand: #0891b2;
-        --brand2: #2563eb;
+        --brand: #38bdf8;
+        --brand2: #60a5fa;
         --sidebar-bg: #111827;
         --hero-bg: #0f172a;
     }
@@ -191,7 +191,7 @@ st.markdown("""
         box-shadow: none;
     }
     .stButton > button:hover {
-        background: #1d4ed8;
+        background: #3b82f6;
         color: #fff;
     }
     .hero {
