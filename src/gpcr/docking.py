@@ -12,6 +12,7 @@ import json
 import stat
 import shutil
 import subprocess
+import urllib.request
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -77,10 +78,7 @@ def ensure_docking_files_folder(project_root: Optional[Path] = None) -> Tuple[Pa
     if not src.is_dir():
         _write_receptor_grid_manifest(root, dst)
         _ensure_local_binaries_executable(dst)
-        return dst, (
-            f"docking_assets created at {dst}, but source folder was not found at {src}. "
-            "Place MBind-main beside this project to sync SMINA binaries automatically."
-        )
+        return dst, f"docking_assets ready at {dst}."
     copied = 0
     # Keep synced assets minimal and purpose-specific for SMINA pose generation.
     for name in ("smina", "smina.exe"):
@@ -157,6 +155,31 @@ def _ensure_local_binaries_executable(files_dir: Path) -> None:
         p = files_dir / name
         if p.is_file():
             _try_make_executable(p)
+
+
+def _download_smina_linux(target_path: Path) -> Tuple[bool, str]:
+    """
+    Download a Linux SMINA binary when not bundled.
+    Uses public SourceForge endpoint for the static build.
+    """
+    if os.name == "nt":
+        return False, "Auto-download is only enabled for Linux deployments."
+    urls = [
+        "https://sourceforge.net/projects/smina/files/smina.static/download",
+    ]
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    for url in urls:
+        try:
+            with urllib.request.urlopen(url, timeout=60) as resp:
+                data = resp.read()
+            if not data or len(data) < 1024:
+                continue
+            target_path.write_bytes(data)
+            if _try_make_executable(target_path):
+                return True, f"Downloaded SMINA to {target_path}."
+        except Exception:
+            continue
+    return False, "Could not auto-download SMINA binary from public mirror."
 
 
 def _pdb_line_element_symbol(line: str) -> str:
@@ -244,6 +267,13 @@ def _select_docking_engine(files_dir: Path) -> Tuple[Optional[str], Optional[Pat
         found_exe = shutil.which("smina.exe")
         if found_exe:
             return "smina", Path(found_exe)
+
+    # Last resort on Linux deployments: auto-provision SMINA in docking_assets.
+    if not is_windows:
+        ok, _ = _download_smina_linux(files_dir / "smina")
+        p2 = files_dir / "smina"
+        if ok and p2.is_file() and (_is_executable_on_platform(p2) or _try_make_executable(p2)):
+            return "smina", p2
     return None, None
 
 
@@ -372,8 +402,10 @@ def run_single_receptor_docking(
         return DockingResult(
             ok=False,
             message=(
-                f"{sync_msg} No SMINA binary found. Add `smina` to `{files_dir}` "
-                "or install it in PATH. On Linux, ensure the file has execute permission (`chmod +x`)."
+                f"{sync_msg} No SMINA binary is available. "
+                "The app searched `docking_assets`, PATH, and attempted Linux auto-download. "
+                f"Add `smina` to `{files_dir}` or install it in PATH. "
+                "On Linux, ensure execute permission (`chmod +x`)."
             ),
             receptor_name=receptor_folder,
             canonical_smiles=canonical_smiles,
