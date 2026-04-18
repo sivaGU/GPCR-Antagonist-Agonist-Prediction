@@ -743,6 +743,10 @@ def render_gpcr_prediction_page():
                         st.warning("streamlit.components is unavailable; cannot embed the docked 3D viewer.")
                     elif dock_result.get("html"):
                         st_components.html(str(dock_result["html"]), height=560, scrolling=False)
+                        st.caption(
+                            "**3D viewer:** drag to rotate the scene • **Ctrl+drag** or **middle mouse** drag to pan "
+                            "(move left/right and up/down) • scroll to zoom."
+                        )
                         score = dock_result.get("score_kcal_mol")
                         st.markdown(
                             f"**Top Pose Docking Score (kcal/mol):** "

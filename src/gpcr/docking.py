@@ -36,9 +36,11 @@ DEFAULT_NUM_MODES = 10
 DEFAULT_SEED = 42
 DEFAULT_TIMEOUT_S = 300
 
-# Reuse the same flat receptor/ligand colors as the GUI viewer.
+# Tan cartoon used elsewhere; post-docking view uses white receptor + emphasized ligand.
 RECEPTOR_CARTOON_HEX = "d2b48c"
-DOCKED_LIGAND_STICK_HEX = "35c86d"
+DOCKED_RECEPTOR_CARTOON_HEX = "ffffff"
+DOCKED_LIGAND_STICK_HEX = "00c853"
+DOCKED_VIEW_BG = "#e8eef5"
 
 
 @dataclass
@@ -355,10 +357,23 @@ def _build_docked_complex_html(receptor_pdb_text: str, pose_pdb_text: str, width
         return None
     try:
         view = py3Dmol.view(width=width, height=height)
+        # Light background; white receptor reads clearly with AO shading on folds.
+        view.setBackgroundColor(DOCKED_VIEW_BG)
+        view.enableFog(False)
+        try:
+            view.setViewStyle({"style": "ambientOcclusion", "strength": 0.42, "radius": 3.0})
+        except Exception:
+            pass
         view.addModel(receptor_pdb_text, "pdb")
-        view.setStyle({"model": 0}, {"cartoon": {"color": f"0x{RECEPTOR_CARTOON_HEX}"}})
+        view.setStyle(
+            {"model": 0},
+            {"cartoon": {"color": f"0x{DOCKED_RECEPTOR_CARTOON_HEX}", "style": "rectangle", "thickness": 0.35}},
+        )
         view.addModel(pose_pdb_text, "pdb")
-        view.setStyle({"model": 1}, {"stick": {"radius": 0.16, "color": f"0x{DOCKED_LIGAND_STICK_HEX}"}})
+        view.setStyle(
+            {"model": 1},
+            {"stick": {"radius": 0.22, "color": f"0x{DOCKED_LIGAND_STICK_HEX}"}},
+        )
         view.zoomTo()
         return view._make_html()
     except Exception:
