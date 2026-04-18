@@ -67,7 +67,7 @@ from src.gpcr.predict import (
     get_available_receptors,
 )
 from src.gpcr.structure_view import py3dmol_available
-from src.gpcr.docking import run_single_receptor_docking
+from src.gpcr.docking import compute_receptor_grid_params, run_single_receptor_docking
 
 try:
     import streamlit.components.v1 as st_components
@@ -721,16 +721,105 @@ def render_gpcr_prediction_page():
             st.divider()
             st.subheader("Docking + receptor-ligand visualization")
             st.caption(
-                "Grid center is set to the centroid of this receptor's `<id>_ligand_only.pdb`; "
-                "grid size is auto-derived per receptor (15-20 Å per axis). "
+                "**Recommended** grid center and size come from this receptor's `<id>_ligand_only.pdb` "
+                "(centroid and padded extent, each axis clipped to 15–20 Å). You can override these in the panel below. "
                 "Pose generation uses SMINA with defaults: exhaustiveness=64, num_modes=10, seed=42."
             )
 
+            dock_folder = str(last_pred["receptor"])
+            rec_center, rec_size, grid_help = compute_receptor_grid_params(dock_folder)
+
+            with st.expander("Docking search box (recommended vs. custom)", expanded=False):
+                if rec_center is None or rec_size is None:
+                    st.info(grid_help)
+                else:
+                    st.caption(
+                        "These defaults follow the co-crystal ligand geometry. Edited values are passed to SMINA as "
+                        "`--center_*` and `--size_*`."
+                    )
+                    cx, cy, cz = st.columns(3)
+                    with cx:
+                        st.number_input(
+                            "Center X (Å)",
+                            format="%.3f",
+                            step=0.1,
+                            value=float(rec_center[0]),
+                            key=f"dock_cx_{dock_folder}",
+                        )
+                    with cy:
+                        st.number_input(
+                            "Center Y (Å)",
+                            format="%.3f",
+                            step=0.1,
+                            value=float(rec_center[1]),
+                            key=f"dock_cy_{dock_folder}",
+                        )
+                    with cz:
+                        st.number_input(
+                            "Center Z (Å)",
+                            format="%.3f",
+                            step=0.1,
+                            value=float(rec_center[2]),
+                            key=f"dock_cz_{dock_folder}",
+                        )
+                    sx, sy, sz = st.columns(3)
+                    with sx:
+                        st.number_input(
+                            "Size X (Å)",
+                            format="%.3f",
+                            step=0.5,
+                            min_value=1.0,
+                            max_value=80.0,
+                            value=float(rec_size[0]),
+                            key=f"dock_sx_{dock_folder}",
+                        )
+                    with sy:
+                        st.number_input(
+                            "Size Y (Å)",
+                            format="%.3f",
+                            step=0.5,
+                            min_value=1.0,
+                            max_value=80.0,
+                            value=float(rec_size[1]),
+                            key=f"dock_sy_{dock_folder}",
+                        )
+                    with sz:
+                        st.number_input(
+                            "Size Z (Å)",
+                            format="%.3f",
+                            step=0.5,
+                            min_value=1.0,
+                            max_value=80.0,
+                            value=float(rec_size[2]),
+                            key=f"dock_sz_{dock_folder}",
+                        )
+                    if st.button("Reset box to recommended", key=f"dock_reset_grid_{dock_folder}"):
+                        st.session_state[f"dock_cx_{dock_folder}"] = float(rec_center[0])
+                        st.session_state[f"dock_cy_{dock_folder}"] = float(rec_center[1])
+                        st.session_state[f"dock_cz_{dock_folder}"] = float(rec_center[2])
+                        st.session_state[f"dock_sx_{dock_folder}"] = float(rec_size[0])
+                        st.session_state[f"dock_sy_{dock_folder}"] = float(rec_size[1])
+                        st.session_state[f"dock_sz_{dock_folder}"] = float(rec_size[2])
+                        st.rerun()
+
             if st.button("Run docking and show top pose", key="btn_single_docking", type="secondary"):
                 with st.spinner("Running docking..."):
+                    grid_kw = {}
+                    if rec_center is not None and rec_size is not None:
+                        grid_kw["grid_center"] = (
+                            float(st.session_state[f"dock_cx_{dock_folder}"]),
+                            float(st.session_state[f"dock_cy_{dock_folder}"]),
+                            float(st.session_state[f"dock_cz_{dock_folder}"]),
+                        )
+                        grid_kw["grid_size"] = (
+                            float(st.session_state[f"dock_sx_{dock_folder}"]),
+                            float(st.session_state[f"dock_sy_{dock_folder}"]),
+                            float(st.session_state[f"dock_sz_{dock_folder}"]),
+                        )
                     dock_res = run_single_receptor_docking(
-                        receptor_folder=str(last_pred["receptor"]),
+                        receptor_folder=dock_folder,
                         canonical_smiles=str(last_pred["canonical_smiles"]),
+                        **grid_kw,
                     )
                 st.session_state["last_docking_result"] = dock_res.__dict__
 
@@ -742,6 +831,11 @@ def render_gpcr_prediction_page():
                     elif st_components is None:
                         st.warning("streamlit.components is unavailable; cannot embed the docked 3D viewer.")
                     elif dock_result.get("html"):
+                        st.markdown(
+                            "**3D viewer:** white receptor cartoon, green ligand sticks; the **three closest residues** "
+                            "to the docked ligand are emphasized with **dashed cylinders** from the best contact atom on "
+                            "each residue to the ligand (MBind-style; teal ≈ polar, green ≈ aromatic C–C, slate ≈ other)."
+                        )
                         st_components.html(str(dock_result["html"]), height=560, scrolling=False)
                         st.caption(
                             "**3D viewer:** drag to rotate the scene • **Ctrl+drag** or **middle mouse** drag to pan "
@@ -752,6 +846,18 @@ def render_gpcr_prediction_page():
                             f"**Top Pose Docking Score (kcal/mol):** "
                             f"{float(score):.3f}" if score is not None else "**Top Pose Docking Score (kcal/mol):** N/A"
                         )
+                        gc = dock_result.get("center")
+                        gs = dock_result.get("size")
+                        if gc and gs and len(gc) == 3 and len(gs) == 3:
+                            st.caption(
+                                f"**Search box used:** center ({float(gc[0]):.3f}, {float(gc[1]):.3f}, {float(gc[2]):.3f}) Å · "
+                                f"size ({float(gs[0]):.3f}, {float(gs[1]):.3f}, {float(gs[2]):.3f}) Å"
+                            )
+                        contacts = dock_result.get("contact_summary")
+                        if contacts:
+                            st.markdown("**Closest residue contacts (≤5 Å, best heavy-atom pair per residue):**")
+                            for line in contacts:
+                                st.markdown(f"- {line}")
                     else:
                         st.warning("Docking succeeded, but the 3D viewer payload was empty.")
                 else:
