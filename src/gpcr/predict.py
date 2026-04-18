@@ -95,18 +95,20 @@ INTERACTION_PAIRS: List[Tuple[str, str]] = [
 def _resolve_gpcr_data_root() -> Path:
     """
     Resolve GPCR data root (directory that contains Josh_Receptor_Features/).
-    Priority: GPCR_DATA_ROOT env → ./Josh_Receptor_Features next to this repo
-    → sibling GUI_Folder → legacy GPCRtryagain path.
+
+    Priority (aligned with GPCR-FAP training handoff):
+    GPCR_DATA_ROOT env → sibling **GUI_Folder** (canonical pocket CSVs) →
+    ./Josh_Receptor_Features next to this repo → legacy GPCRtryagain path.
     """
     env_root = os.environ.get("GPCR_DATA_ROOT", "").strip()
     if env_root:
         return Path(env_root)
     project_root = Path(__file__).resolve().parents[2]
-    if (project_root / "Josh_Receptor_Features").is_dir():
-        return project_root
     sibling_gui = project_root.parent / "GUI_Folder"
     if (sibling_gui / "Josh_Receptor_Features").is_dir():
         return sibling_gui
+    if (project_root / "Josh_Receptor_Features").is_dir():
+        return project_root
     return project_root.parent / "GPCRtryagain - Delete - Copy"
 
 
@@ -201,7 +203,9 @@ def _get_receptor_features(receptor_name: str) -> Optional[np.ndarray]:
 
 def _compute_ligand_features(smiles: str) -> Optional[Tuple[np.ndarray, Dict[str, float]]]:
     """
-    Compute ligand features: PhysChem (10) + ECFP4 (2048) = 2058 features.
+    Compute ligand features: PhysChem (10) + Morgan ECFP4 (2048) = 2058 features.
+
+    Morgan: radius 2, 2048 bits, bit vector (not counts) — matches feature_config.json / training export.
     """
     mol = Chem.MolFromSmiles(smiles)
     if mol is None:
@@ -324,10 +328,12 @@ class GPCRPredictor:
         models: List,  # List of trained models (ensemble)
         class_names: List[str] = None,
         threshold: Optional[float] = None,
+        expected_feature_dim: Optional[int] = None,
     ):
         self.models = models
         self.class_names = class_names or ["Agonist", "Antagonist", "Inactive"]
         self.threshold = threshold
+        self.expected_feature_dim = expected_feature_dim
 
     def predict(self, receptor: str, ligand_smiles: str) -> PredictResult:
         """Run full pipeline for one receptor-ligand pair."""
@@ -347,7 +353,27 @@ class GPCRPredictor:
             )
         
         features = _compute_full_features_with_fallback(receptor, canon)
-        
+        if (
+            self.expected_feature_dim is not None
+            and int(features.shape[0]) != int(self.expected_feature_dim)
+        ):
+            return PredictResult(
+                is_valid=False,
+                receptor=receptor,
+                ligand_smiles=ligand_smiles,
+                canonical_smiles=canon,
+                predicted_class="Unknown",
+                class_id=-1,
+                prob_agonist=0.0,
+                prob_antagonist=0.0,
+                prob_inactive=0.0,
+                error=(
+                    f"Descriptor vector length {int(features.shape[0])} does not match "
+                    f"trained model expectation ({int(self.expected_feature_dim)}). "
+                    "Check feature_config.json and predict.py layout (2103 = ligand+receptor+interaction)."
+                ),
+            )
+
         X = features.reshape(1, -1)
         
         # Ensemble prediction
@@ -486,13 +512,20 @@ def load_predictor(
     # Load config
     class_names = ["Agonist", "Antagonist", "Inactive"]
     threshold = None
-    
+    expected_feature_dim: Optional[int] = None
+
     config_path = selected_art / "feature_config.json"
     if config_path.exists():
         import json
         with open(config_path, "r") as f:
             config = json.load(f)
             class_names = config.get("class_names", class_names)
+            nft = config.get("n_features_total")
+            if nft is not None:
+                try:
+                    expected_feature_dim = int(nft)
+                except (TypeError, ValueError):
+                    expected_feature_dim = None
     
     threshold_path = selected_art / "threshold.json"
     if threshold_path.exists():
@@ -501,10 +534,18 @@ def load_predictor(
             thresh_data = json.load(f)
             threshold = thresh_data.get("threshold", threshold)
     
+    if expected_feature_dim is None:
+        for m in models:
+            nfi = getattr(m, "n_features_in_", None)
+            if nfi is not None:
+                expected_feature_dim = int(nfi)
+                break
+
     return GPCRPredictor(
         models=models,
         class_names=class_names,
         threshold=threshold,
+        expected_feature_dim=expected_feature_dim,
     )
 
 

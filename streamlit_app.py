@@ -29,10 +29,17 @@ def _artifact_tree_has_models(artifacts_dir: Path) -> bool:
 
 
 def _resolve_handoff_dir() -> Path:
-    """Prefer project-local artifacts; if they have no models, use sibling ../artifacts (same parent as this repo)."""
+    """
+    Resolve the directory passed to load_predictor() (may be .../artifacts or a flat demo bundle).
+
+    Order: ./artifacts in this repo → sibling **artifact sahith** (updated handoff) → ../artifacts → cwd.
+    """
     local_art = PROJECT_ROOT / "artifacts"
     if _artifact_tree_has_models(local_art):
         return PROJECT_ROOT
+    sahith = PROJECT_ROOT.parent / "artifact sahith"
+    if _artifact_tree_has_models(sahith):
+        return sahith
     parent_art = PROJECT_ROOT.parent / "artifacts"
     if _artifact_tree_has_models(parent_art):
         return PROJECT_ROOT.parent
@@ -43,15 +50,19 @@ HANDOFF_DIR = _resolve_handoff_dir()
 
 
 def _ensure_default_gpcr_data_root() -> None:
-    """Use bundled ./Josh_Receptor_Features when present; else sibling GUI_Folder."""
+    """
+    Default **GPCR_DATA_ROOT** to the folder that contains Josh_Receptor_Features (pocket CSVs).
+
+    Prefer sibling **GUI_Folder** (training layout) when present; else project-local bundle.
+    """
     if os.environ.get("GPCR_DATA_ROOT", "").strip():
-        return
-    if (PROJECT_ROOT / "Josh_Receptor_Features").is_dir():
-        os.environ["GPCR_DATA_ROOT"] = str(PROJECT_ROOT.resolve())
         return
     gui = PROJECT_ROOT.parent / "GUI_Folder"
     if (gui / "Josh_Receptor_Features").is_dir():
         os.environ["GPCR_DATA_ROOT"] = str(gui.resolve())
+        return
+    if (PROJECT_ROOT / "Josh_Receptor_Features").is_dir():
+        os.environ["GPCR_DATA_ROOT"] = str(PROJECT_ROOT.resolve())
 
 
 _ensure_default_gpcr_data_root()
@@ -256,12 +267,12 @@ def render_home_page():
         - **Classes:** Agonist, Antagonist, Inactive
         - **Features:** Ligand (PhysChem + ECFP) + Receptor (31) + Interaction (14)
         - **Models:** LightGBM, Random Forest, XGBoost (ensemble)
-        - **Status:** Ready for ML artifact upload
+        - **Artifacts:** Auto-loads sibling **artifact sahith** or **./artifacts** (2103-dim descriptors)
         """
     )
     st.sidebar.info(
-        "Receptor features default to **GUI_Folder/Josh_Receptor_Features** when that folder sits next to this app. "
-        "Add **model_seed*.pkl** under **artifacts/demo_**_* to enable predictions."
+        "Receptor pocket CSVs default to **GUI_Folder/Josh_Receptor_Features** (set **GPCR_DATA_ROOT** to override). "
+        "Trained models load from **artifact sahith** next to this project or from **./artifacts**."
     )
 
     st.markdown(
@@ -327,7 +338,7 @@ def render_documentation_page():
         ├── src/gpcr/             # Prediction module
         │   ├── predict.py        # predict_single, predict_batch, load_predictor
         │   └── cli.py           # Command-line interface
-        └── artifacts/            # Model artifacts (add your models here)
+        └── artifacts/            # Or use sibling artifact sahith/ with demo_rf/, …
             ├── model_seed0.pkl (or .joblib)
             ├── model_seed1.pkl
             ├── ...
@@ -343,7 +354,7 @@ def render_documentation_page():
         1. Create and activate a virtual environment (conda, venv, or poetry).
         2. Install dependencies: `pip install -r requirements.txt`.
         3. Receptor data: keep **GUI_Folder** beside **GPCR-FAP-main** (auto-detects **Josh_Receptor_Features**), or set **`GPCR_DATA_ROOT`**.
-        4. **Add your trained ML models** to the `artifacts/` folder (see below).
+        4. **Trained models:** place them under **`./artifacts`** *or* a sibling folder **`artifact sahith`** (same layout: `demo_rf/`, `demo_lightgbm/`, …); the app picks those up automatically (see below).
         5. Launch the app: `streamlit run streamlit_app.py`.
         6. Streamlit will open at `http://localhost:8501`. Use the sidebar to switch between pages.
         """
@@ -367,7 +378,10 @@ def render_documentation_page():
         """
         ## Adding your ML artifacts
         
-        Place your trained model files in the `artifacts/` folder:
+        Place your trained model files under **`./artifacts`** (inside this repo) **or** under a sibling folder
+        **`artifact sahith`** (flat layout: `demo_rf/model_seed0.pkl`, …). The GUI checks `./artifacts` first, then **`artifact sahith`**, then **`../artifacts`**.
+        
+        Example layout under `artifacts/`:
         - `model_seed0.pkl` (or `.joblib`)
         - `model_seed1.pkl`
         - `model_seed2.pkl`
@@ -460,7 +474,8 @@ def render_demo_prediction_page():
     except Exception as e:
         st.error(f"Could not load {model_type_label} model: {e}")
         st.info(
-            "Ensure artifacts/demo_rf, demo_lightgbm, demo_xgboost, and/or demo_ensemble exist with model_seed*.pkl."
+            "Ensure **./artifacts** or sibling **artifact sahith** contains **demo_rf**, **demo_lightgbm**, "
+            "**demo_xgboost**, and/or **demo_ensemble** with **model_seed*.pkl** and **feature_config.json**."
         )
         return
 
@@ -551,10 +566,10 @@ def render_gpcr_prediction_page():
     except Exception as e:
         st.error(f"Could not load {model_type_label} model: {e}")
         st.info(
-            "Ensure the **artifacts/** folder contains demo subfolders (e.g. **artifacts/demo_rf/**) with:\n"
+            "Ensure **./artifacts** or sibling **artifact sahith** contains demo subfolders (e.g. **demo_rf/**) with:\n"
             "- Model files (model_seed*.pkl or model_seed*.joblib)\n"
-            "- feature_config.json\n"
-            "- threshold.json"
+            "- feature_config.json (2103-dim layout)\n"
+            "- threshold.json (optional)"
         )
         return
 
@@ -563,6 +578,12 @@ def render_gpcr_prediction_page():
         f"**Model:** {model_type_label}\n\n"
         f"**Loaded:** {len(predictor.models)} model(s)\n\n"
         f"**Classes:** {', '.join(predictor.class_names)}"
+    )
+    _gdata = os.environ.get("GPCR_DATA_ROOT", "").strip()
+    _efd = getattr(predictor, "expected_feature_dim", None)
+    st.caption(
+        f"**ML bundle:** `{HANDOFF_DIR}` · **GPCR_DATA_ROOT (pocket CSVs):** `{_gdata or 'default'}` · "
+        f"**Descriptor dim:** {_efd if _efd is not None else '—'} (trained on 2103 = ligand+receptor+interaction)"
     )
 
     st.divider()
