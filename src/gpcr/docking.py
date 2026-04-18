@@ -6,6 +6,7 @@ grid centers from each receptor folder's `<id>_ligand_only.pdb`.
 """
 from __future__ import annotations
 
+import math
 import os
 import re
 import json
@@ -16,7 +17,7 @@ import urllib.request
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Dict, List, NamedTuple, Optional, Tuple
 
 import numpy as np
 from rdkit import Chem
@@ -42,6 +43,250 @@ DOCKED_RECEPTOR_CARTOON_HEX = "ffffff"
 DOCKED_LIGAND_STICK_HEX = "00c853"
 DOCKED_VIEW_BG = "#e8eef5"
 
+# Closest-residue contact visualization (MBind-style dashed cylinders)
+_SOLVENT_RESN = {"HOH", "WAT", "SOL", "TIP", "TIP3", "HO4"}
+_METAL_RESN = {"ZN", "MG", "FE", "CU", "FE2", "MN", "NI", "CO", "CD", "NA", "CL", "CA"}
+_AROM_RESN = {"PHE", "TYR", "TRP", "HIS", "HID", "HIE", "HIP"}
+_POLAR_ELEM = {"O", "N", "S", "P", "F", "CL", "BR", "I"}
+
+
+class _ViewAtom(NamedTuple):
+    chain: str
+    resi: int
+    resn: str
+    atom_name: str
+    x: float
+    y: float
+    z: float
+    elem: str  # element symbol (best-effort)
+
+
+def _elem_from_atom_line(line: str) -> str:
+    if len(line) >= 78:
+        e = line[76:78].strip().upper()
+        if e:
+            if len(e) == 2 and e in ("BR", "CL", "FE", "ZN", "MG", "NA", "MN", "CU", "CO", "NI", "SE"):
+                return e
+            return e[0]
+    name = line[12:16].strip().upper() if len(line) >= 16 else ""
+    if not name:
+        return "C"
+    if name[:2] in ("BR", "CL"):
+        return name[:2]
+    return name[0]
+
+
+def _parse_receptor_pdb_heavy_atoms(pdb_text: str) -> List[_ViewAtom]:
+    """Protein ATOMs only (standard residues), heavy atoms."""
+    from .structure_view import _STANDARD_PROTEIN_RESN
+
+    atoms: List[_ViewAtom] = []
+    for line in pdb_text.splitlines():
+        if not line.startswith("ATOM") or len(line) < 54:
+            continue
+        resn = line[17:20].strip().upper()
+        if resn not in _STANDARD_PROTEIN_RESN:
+            continue
+        elem = _elem_from_atom_line(line)
+        if elem in ("H", "D"):
+            continue
+        try:
+            x = float(line[30:38])
+            y = float(line[38:46])
+            z = float(line[46:54])
+        except ValueError:
+            continue
+        chain = line[21:22].strip() if len(line) > 21 else "A"
+        if not chain:
+            chain = "A"
+        try:
+            resi = int(line[22:26].strip())
+        except ValueError:
+            continue
+        atom_name = line[12:16].strip()
+        atoms.append(_ViewAtom(chain, resi, resn, atom_name, x, y, z, elem))
+    return atoms
+
+
+def _parse_pose_heavy_atoms(pose_block: str) -> List[_ViewAtom]:
+    """Ligand pose from PDBQT/PDB-like ATOM/HETATM lines."""
+    atoms: List[_ViewAtom] = []
+    for line in pose_block.splitlines():
+        if not line.startswith(("ATOM", "HETATM")) or len(line) < 54:
+            continue
+        parts = line.split()
+        ad4_or_elem = (parts[-1] if parts else "").strip()
+        if ad4_or_elem and ad4_or_elem[0] in ("H", "h"):
+            continue
+        elem = _elem_from_atom_line(line)
+        if elem in ("H", "D"):
+            continue
+        try:
+            x = float(line[30:38])
+            y = float(line[38:46])
+            z = float(line[46:54])
+        except ValueError:
+            continue
+        chain = line[21:22].strip() if len(line) > 21 else "L"
+        if not chain:
+            chain = "L"
+        try:
+            resi = int(line[22:26].strip())
+        except ValueError:
+            resi = 1
+        resn = line[17:20].strip().upper() if len(line) > 20 else "UNL"
+        atom_name = line[12:16].strip()
+        atoms.append(_ViewAtom(chain, resi, resn, atom_name, x, y, z, elem))
+    return atoms
+
+
+def _dist_atoms(a: _ViewAtom, b: _ViewAtom) -> float:
+    return math.sqrt((a.x - b.x) ** 2 + (a.y - b.y) ** 2 + (a.z - b.z) ** 2)
+
+
+def _closest_protein_residues(
+    rec_atoms: List[_ViewAtom], lig_atoms: List[_ViewAtom], n: int = 3
+) -> List[Tuple[str, int]]:
+    if not lig_atoms:
+        return []
+    best: Dict[Tuple[str, int], float] = {}
+    for ra in rec_atoms:
+        ru = ra.resn.upper()
+        if ru in _SOLVENT_RESN or ru in _METAL_RESN:
+            continue
+        d_min = min(_dist_atoms(ra, la) for la in lig_atoms)
+        key = (ra.chain, ra.resi)
+        if key not in best or d_min < best[key]:
+            best[key] = d_min
+    ranked = sorted(best.items(), key=lambda kv: kv[1])
+    return [k for k, _ in ranked[:n]]
+
+
+def _best_contact_pair(
+    rec_atoms: List[_ViewAtom],
+    lig_atoms: List[_ViewAtom],
+    chain: str,
+    resi: int,
+) -> Optional[Tuple[_ViewAtom, _ViewAtom, float]]:
+    r_atoms = [a for a in rec_atoms if a.chain == chain and a.resi == resi]
+    if not r_atoms or not lig_atoms:
+        return None
+    best: Optional[Tuple[_ViewAtom, _ViewAtom, float]] = None
+    for ra in r_atoms:
+        for la in lig_atoms:
+            d = _dist_atoms(ra, la)
+            if best is None or d < best[2]:
+                best = (ra, la, d)
+    return best
+
+
+def _interaction_line_color(ra: _ViewAtom, la: _ViewAtom, d: float) -> str:
+    """Teal (polar), green (aromatic C–C), slate otherwise — aligned with MBind logic."""
+    if ra.elem in _POLAR_ELEM or la.elem in _POLAR_ELEM:
+        return "0x2a9d9d"
+    if (
+        d < 4.8
+        and ra.elem == "C"
+        and la.elem == "C"
+        and (ra.resn.upper() in _AROM_RESN or la.resn.upper() in _AROM_RESN)
+    ):
+        return "0x3d8f3d"
+    return "0x7a8fa3"
+
+
+def _add_dashed_line(
+    view,
+    a: _ViewAtom,
+    b: _ViewAtom,
+    color: str,
+    dash_len: float = 0.45,
+    gap_len: float = 0.12,
+    radius: float = 0.05,
+) -> None:
+    dx = b.x - a.x
+    dy = b.y - a.y
+    dz = b.z - a.z
+    dist = math.sqrt(dx * dx + dy * dy + dz * dz)
+    if dist < 1e-6:
+        return
+    ux, uy, uz = dx / dist, dy / dist, dz / dist
+    pos = 0.0
+    min_seg = 0.08
+    while pos < dist:
+        seg_end = min(pos + dash_len, dist)
+        if seg_end - pos >= min_seg:
+            view.addCylinder(
+                {
+                    "start": {"x": a.x + ux * pos, "y": a.y + uy * pos, "z": a.z + uz * pos},
+                    "end": {"x": a.x + ux * seg_end, "y": a.y + uy * seg_end, "z": a.z + uz * seg_end},
+                    "radius": radius,
+                    "color": color,
+                    "fromCap": True,
+                    "toCap": True,
+                }
+            )
+        pos = seg_end + gap_len
+
+
+def _apply_closest_residue_highlights_and_contacts(
+    view,
+    rec_atoms: List[_ViewAtom],
+    lig_atoms: List[_ViewAtom],
+    *,
+    receptor_cartoon_hex: str,
+    contact_max_dist: float = 5.0,
+    n_residues: int = 3,
+) -> None:
+    """Highlight closest residues (cartoon + sticks) and dashed lines to ligand (MBind-style)."""
+    tan_hex = receptor_cartoon_hex.lstrip("#").lower()
+    closest = _closest_protein_residues(rec_atoms, lig_atoms, n=n_residues)
+    for chain, resi in closest:
+        view.setStyle(
+            {"model": 0, "chain": chain, "resi": resi},
+            {
+                "cartoon": {"color": f"0x{tan_hex}", "opacity": 0.38},
+                "stick": {"radius": 0.13, "color": "0xb0bec5"},
+            },
+        )
+    for chain, resi in closest:
+        pair = _best_contact_pair(rec_atoms, lig_atoms, chain, resi)
+        if pair is None:
+            continue
+        ra, la, d = pair
+        if d > contact_max_dist:
+            continue
+        _add_dashed_line(view, ra, la, _interaction_line_color(ra, la, d))
+
+
+def _contact_type_label(ra: _ViewAtom, la: _ViewAtom, d: float) -> str:
+    col = _interaction_line_color(ra, la, d)
+    if col == "0x2a9d9d":
+        return "polar / H-bond–like"
+    if col == "0x3d8f3d":
+        return "aromatic (C–C)"
+    return "van der Waals / hydrophobic"
+
+
+def build_closest_contact_summary(
+    receptor_pdb_text: str, pose_pdb_text: str, n: int = 3, contact_max_dist: float = 5.0
+) -> List[str]:
+    """Human-readable lines for the n closest protein residues to the docked ligand (MBind-style geometry)."""
+    rec_atoms = _parse_receptor_pdb_heavy_atoms(receptor_pdb_text)
+    lig_atoms = _parse_pose_heavy_atoms(pose_pdb_text)
+    if not rec_atoms or not lig_atoms:
+        return []
+    lines: List[str] = []
+    for chain, resi in _closest_protein_residues(rec_atoms, lig_atoms, n=n):
+        pair = _best_contact_pair(rec_atoms, lig_atoms, chain, resi)
+        if pair is None:
+            continue
+        ra, la, d = pair
+        if d > contact_max_dist:
+            continue
+        label = _contact_type_label(ra, la, d)
+        lines.append(f"{chain} {ra.resn} {resi} — {d:.2f} Å ({label})")
+    return lines
+
 
 @dataclass
 class DockingResult:
@@ -57,6 +302,7 @@ class DockingResult:
     out_pose_path: Optional[str]
     log_path: Optional[str]
     html: Optional[str]
+    contact_summary: Optional[List[str]] = None
 
 
 def _resolve_project_root() -> Path:
@@ -356,6 +602,8 @@ def _build_docked_complex_html(receptor_pdb_text: str, pose_pdb_text: str, width
     if not receptor_pdb_text.strip() or not pose_pdb_text.strip():
         return None
     try:
+        rec_atoms = _parse_receptor_pdb_heavy_atoms(receptor_pdb_text)
+        lig_atoms = _parse_pose_heavy_atoms(pose_pdb_text)
         view = py3Dmol.view(width=width, height=height)
         # Light background; white receptor reads clearly with AO shading on folds.
         view.setBackgroundColor(DOCKED_VIEW_BG)
@@ -369,7 +617,17 @@ def _build_docked_complex_html(receptor_pdb_text: str, pose_pdb_text: str, width
             {"model": 0},
             {"cartoon": {"color": f"0x{DOCKED_RECEPTOR_CARTOON_HEX}", "style": "rectangle", "thickness": 0.35}},
         )
-        view.addModel(pose_pdb_text, "pdb")
+        if rec_atoms and lig_atoms:
+            _apply_closest_residue_highlights_and_contacts(
+                view,
+                rec_atoms,
+                lig_atoms,
+                receptor_cartoon_hex=DOCKED_RECEPTOR_CARTOON_HEX,
+            )
+        try:
+            view.addModel(pose_pdb_text, "pdbqt")
+        except Exception:
+            view.addModel(pose_pdb_text, "pdb")
         view.setStyle(
             {"model": 1},
             {"stick": {"radius": 0.22, "color": f"0x{DOCKED_LIGAND_STICK_HEX}"}},
@@ -409,6 +667,8 @@ def run_single_receptor_docking(
     canonical_smiles: str,
     base_exhaustiveness: int = DEFAULT_EXHAUSTIVENESS,
     base_num_modes: int = DEFAULT_NUM_MODES,
+    grid_center: Optional[Tuple[float, float, float]] = None,
+    grid_size: Optional[Tuple[float, float, float]] = None,
 ) -> DockingResult:
     project_root = _resolve_project_root()
     files_dir, sync_msg = ensure_docking_files_folder(project_root)
@@ -483,6 +743,26 @@ def run_single_receptor_docking(
             html=None,
         )
     center, size = _grid_from_ligand_coords(lig_coords)
+    if grid_center is not None:
+        center = (float(grid_center[0]), float(grid_center[1]), float(grid_center[2]))
+    if grid_size is not None:
+        sx, sy, sz = float(grid_size[0]), float(grid_size[1]), float(grid_size[2])
+        if sx <= 0.0 or sy <= 0.0 or sz <= 0.0:
+            return DockingResult(
+                ok=False,
+                message="Grid size must be positive on every axis (size_x, size_y, size_z).",
+                receptor_name=receptor_folder,
+                canonical_smiles=canonical_smiles,
+                center=center,
+                size=size,
+                score_kcal_mol=None,
+                engine=engine or "unknown",
+                command="",
+                out_pose_path=None,
+                log_path=None,
+                html=None,
+            )
+        size = (sx, sy, sz)
 
     runs_dir = project_root / "docking_results"
     run_dir = runs_dir / f"{receptor_folder}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
@@ -635,6 +915,9 @@ def run_single_receptor_docking(
     pose_text = _extract_top_pose_pdb_block(docked_out)
     rec_text = _sanitize_receptor_pdb_for_view(rec_path.read_text(encoding="utf-8", errors="ignore"))
     html = _build_docked_complex_html(rec_text, pose_text or "")
+    contact_lines: Optional[List[str]] = None
+    if pose_text and rec_text.strip():
+        contact_lines = build_closest_contact_summary(rec_text, pose_text)
 
     return DockingResult(
         ok=True,
@@ -649,5 +932,6 @@ def run_single_receptor_docking(
         out_pose_path=str(docked_out),
         log_path=str(log_path),
         html=html,
+        contact_summary=contact_lines,
     )
 
