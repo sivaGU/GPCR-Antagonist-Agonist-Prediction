@@ -2,6 +2,8 @@
 
 GPCR-FAP is a Streamlit GUI for **Class A GPCR** receptor-ligand **multiclass** functional activity prediction (Agonist / Antagonist / Inactive), with optional **SMINA pose generation** and 3D receptor-ligand visualization.
 
+Hosted app: https://gpcrfap.streamlit.app/
+
 Repository: https://github.com/sivaGU/GPCR-FAP
 
 ## What This App Provides
